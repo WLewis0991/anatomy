@@ -1,26 +1,62 @@
 @import "tailwindcss";
 
+/* The root element carries the state, so dark utilities key off one attribute
+   rather than a media query the user's choice could contradict. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Colour means direction or kind. Everything else is greyscale. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #ffffff;
+  --panel: #fafafa;
+  --fg: #18181b;
+  --muted: #71717a;
+  --line: #e4e4e7;
+  --accent: #2563eb;
+  --incoming: #16a34a;
+  --outgoing: #d97706;
+  color-scheme: light;
+}
+
+:root.dark {
+  --bg: #09090b;
+  --panel: #0d0d10;
+  --fg: #e4e4e7;
+  --muted: #8b8b93;
+  --line: #232327;
+  --accent: #3b82f6;
+  --incoming: #22c55e;
+  --outgoing: #f59e0b;
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-incoming: var(--incoming);
+  --color-outgoing: var(--outgoing);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    background: var(--bg);
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  /* Tailwind's reset leaves buttons with a default cursor, so nothing in the
+     shell reads as clickable. Links already get one from the browser. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
 }
