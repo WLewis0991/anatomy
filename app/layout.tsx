@@ -1,5 +1,7 @@
+import { ClerkProvider, Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -23,7 +25,34 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <ClerkProvider>
+          <header className="flex items-center gap-3 border-b border-black/[.08] px-4 py-2 text-sm dark:border-white/[.145]">
+            <span className="font-mono text-xs text-zinc-500">anatomy</span>
+            <div className="flex-1" />
+            {/* Auth state is only known at request time, so it streams in behind
+                its own boundary and the header keeps its place in the static shell. */}
+            <Suspense fallback={<div className="h-[22px] w-[132px]" />}>
+              <Show when="signed-out">
+                <SignInButton mode="modal">
+                  <button className="border border-black/[.08] px-2 py-1 font-mono text-xs dark:border-white/[.145]">
+                    sign in
+                  </button>
+                </SignInButton>
+                <SignUpButton mode="modal">
+                  <button className="border border-black/[.08] px-2 py-1 font-mono text-xs dark:border-white/[.145]">
+                    sign up
+                  </button>
+                </SignUpButton>
+              </Show>
+              <Show when="signed-in">
+                <UserButton />
+              </Show>
+            </Suspense>
+          </header>
+          {children}
+        </ClerkProvider>
+      </body>
     </html>
   );
 }
