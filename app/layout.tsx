@@ -29,7 +29,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-bg text-fg">
+      {/* `--bg` was renamed to `--ground`, so `bg-bg` generated nothing and the
+          page rendered correctly only because globals.css paints the body too.
+          `text-fg` still resolves; `--fg` was not renamed. */}
+      <body className="min-h-full bg-ground text-fg">
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <ClerkProvider
           // Clerk's default theme follows `color-scheme`, which globals.css sets
