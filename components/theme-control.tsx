@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore, type ComponentType } from "react";
 
+import { DarkIcon, LightIcon, SystemIcon } from "@/components/icons";
 import {
   applyTheme,
   currentTheme,
@@ -10,11 +11,15 @@ import {
   type Theme,
 } from "@/lib/theme";
 
-const LABELS: Record<Theme, string> = {
-  system: "auto",
-  light: "light",
-  dark: "dark",
-};
+const OPTIONS = [
+  { value: "system", label: "follow the system", Icon: SystemIcon },
+  { value: "light", label: "light", Icon: LightIcon },
+  { value: "dark", label: "dark", Icon: DarkIcon },
+] as const satisfies ReadonlyArray<{
+  value: Theme;
+  label: string;
+  Icon: ComponentType<Record<string, never>>;
+}>;
 
 // The server knows nothing about localStorage, so hydration renders with the
 // system default and picks the stored preference up immediately afterwards.
@@ -39,23 +44,32 @@ export function ThemeControl() {
   return (
     <div
       role="group"
-      aria-label="Theme"
-      className="flex items-center border border-line font-mono text-[11px]"
+      aria-label="Appearance"
+      className="flex w-fit items-center gap-0.5 rounded-md border border-line bg-surface-2 p-0.5"
     >
-      {(["system", "light", "dark"] as const).map((option) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={theme === option}
-          onClick={() => storeTheme(option)}
-          className={
-            theme === option
-              ? "bg-fg px-1.5 py-0.5 text-bg"
-              : "px-1.5 py-0.5 text-muted hover:bg-panel hover:text-fg"
-          }
-        >
-          {LABELS[option]}
-        </button>
+      {/* Real radios behind sr-only labels, because a group of them is one control
+          and the browser already knows how a single-choice group answers arrow
+          keys. A row of buttons with aria-pressed would not. */}
+      {OPTIONS.map(({ value, label, Icon }) => (
+        <label key={value} className="group/opt relative">
+          <input
+            type="radio"
+            name="appearance"
+            value={value}
+            checked={theme === value}
+            onChange={() => storeTheme(value)}
+            // The ring is drawn on the cell beside it; the input is inside the
+            // shell's focus rule as well and would otherwise outline its own
+            // one-pixel clipped box.
+            className="peer sr-only focus-visible:outline-none"
+          />
+          <span
+            className="flex h-6 w-7 items-center justify-center rounded-[3px] text-fg-muted group-hover/opt:text-fg peer-checked:bg-surface peer-checked:text-fg peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-accent"
+          >
+            <Icon />
+            <span className="sr-only">{label}</span>
+          </span>
+        </label>
       ))}
     </div>
   );
