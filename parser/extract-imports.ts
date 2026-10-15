@@ -76,13 +76,14 @@ export function extractImports(files: readonly DiscoveredFile[]): ExtractResult 
     for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
       if (call.getExpression().getKind() !== SyntaxKind.ImportKeyword) continue;
       const argument = call.getArguments()[0];
+      const literal = literalSpecifierOf(argument);
       imports.push({
         from: file.relativePath,
-        specifier: argument ? argument.getText().slice(0, 120) : "(no argument)",
+        specifier:
+          literal ?? (argument ? argument.getText().slice(0, 120) : "(no argument)"),
         kind: "dynamic",
         line: lineOf(sourceFile, call),
-        ...(argument &&
-        (Node.isStringLiteral(argument) || Node.isNoSubstitutionTemplateLiteral(argument))
+        ...(literal !== null
           ? {}
           : {
               unresolvable: {
@@ -100,4 +101,17 @@ export function extractImports(files: readonly DiscoveredFile[]): ExtractResult 
 
 function lineOf(sourceFile: SourceFile, node: Node): number {
   return sourceFile.getLineAndColumnAtPos(node.getStart()).line;
+}
+
+/**
+ * The module as written, or null when there is no value to take because the
+ * argument is worked out at runtime. A literal is unwrapped, because the quotes
+ * are syntax and a specifier carrying them resolves to nothing.
+ */
+function literalSpecifierOf(argument: Node | undefined): string | null {
+  if (argument === undefined) return null;
+  if (Node.isStringLiteral(argument) || Node.isNoSubstitutionTemplateLiteral(argument)) {
+    return argument.getLiteralValue();
+  }
+  return null;
 }

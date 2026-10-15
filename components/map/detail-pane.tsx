@@ -225,18 +225,16 @@ function FileDetail(props: DetailPaneProps & { file: ParsedFile }) {
  * the difference is otherwise invisible.
  */
 function FolderDetail(props: DetailPaneProps) {
-  const { selection, files, edges, root } = props;
+  const { selection, edges, root } = props;
   if (selection === null || selection.kind !== "folder") return null;
   const pane = hoverProps(props);
   const { folderPath, label } = selection;
   const folder = findFolder(root, folderPath);
   const kinds = folder === null ? [] : countKindsIn(folder);
 
-  const owned = new Set(
-    files
-      .filter((file) => (folderPath === "" ? file.folder === "." : file.folder === folderPath))
-      .map((file) => file.path),
-  );
+  // A file's own `folder` cannot be used here: folding merges directories, so the
+  // folder a file was written in is often not the node that holds it afterwards.
+  const owned = new Set(folder === null ? [] : folder.files.map((file) => file.path));
 
   const out = new Map<string, number>();
   const into = new Map<string, number>();
@@ -245,14 +243,13 @@ function FolderDetail(props: DetailPaneProps) {
   for (const edge of edges) {
     const mine = owned.has(edge.from);
     const theirs = owned.has(edge.to);
-    if (mine && theirs) continue;
-    if (!mine && !theirs) continue;
-    const other = mine ? edge.to : edge.from;
-    const bucket = mine ? out : into;
-    if (owned.has(other)) {
+    if (mine && theirs) {
       outside += 1;
       continue;
     }
+    if (!mine && !theirs) continue;
+    const other = mine ? edge.to : edge.from;
+    const bucket = mine ? out : into;
     bucket.set(other, (bucket.get(other) ?? 0) + 1);
   }
 

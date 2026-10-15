@@ -2,12 +2,15 @@
   "name": "anatomy",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "parse": "node parser/cli.ts",
+    "parse": "node --experimental-strip-types parser/cli.ts",
     "report:canvas": "node --experimental-strip-types scripts/report-canvas.ts"
   },
   "dependencies": {

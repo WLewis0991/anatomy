@@ -13,8 +13,13 @@ import type {
  * no adapters. Two imports between the same pair of files are one edge.
  */
 
+/**
+ * The ordered file pair is the whole of an edge's identity. A file importing the
+ * same file twice, through two specifiers or as both a static and a dynamic
+ * import, is one edge; whichever record came first is the one kept.
+ */
 function edgeKey(edge: Edge): string {
-  return `${edge.from}\u0000${edge.to}\u0000${edge.kind}\u0000${edge.specifier}`;
+  return `${edge.from}\u0000${edge.to}`;
 }
 
 export function dedupeEdges(edges: readonly Edge[]): Edge[] {

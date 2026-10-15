@@ -156,7 +156,7 @@ function Degrees({ fanIn, fanOut }: { fanIn: number; fanOut: number }) {
       )}
       {fanIn > 0 && fanOut > 0 && <span className="px-0.5 text-fg-muted">/</span>}
       {fanOut > 0 && (
-        <span className="text-outgoing" title={`${fanOut} depend on this`}>
+        <span className="text-outgoing" title={`depends on ${fanOut}`}>
           &rarr;{fanOut}
         </span>
       )}

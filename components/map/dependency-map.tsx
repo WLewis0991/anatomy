@@ -13,7 +13,7 @@ import "reactflow/dist/style.css";
 
 import type { Edge, ParsedFile } from "@/parser/types";
 import { folderHoldingFile, type FoldResult } from "@/parser/folding";
-import { deriveCanvas, rowId, rowLabel, ROWS_PER_STEP } from "@/lib/graph/derive";
+import { anchorForFile, deriveCanvas, rowId, rowLabel, ROWS_PER_STEP } from "@/lib/graph/derive";
 import { layoutCanvas, type PositionedNode } from "@/lib/graph/layout";
 import { computeEmphasis } from "@/lib/graph/emphasis";
 import type { Selection } from "@/lib/graph/types";
@@ -267,7 +267,8 @@ function DependencyMapCanvas({ files, edges, fileFanIn, fileFanOut, fold, select
   /**
    * A hovered node reports the file it stands for, so the pane can ring the matching
    * row. A folder node stands for no single file and reports nothing — the pane has
-   * no concept of a folder row to highlight.
+   * no concept of a folder row to highlight. The map still lights that folder, as the
+   * anchor for the file the pane is hovering.
    *
    * Leave is guarded on where the pointer went: moving from a row out onto its own
    * panel fires leave, and clearing there would strobe the highlight off between two
@@ -295,13 +296,25 @@ function DependencyMapCanvas({ files, edges, fileFanIn, fileFanOut, fold, select
     [hoverPath, onHover],
   );
 
+  /**
+   * The one node the hovered file is standing on right now. A file with a row of
+   * its own lights that row; a file the canvas has folded away — inside a shut
+   * folder, or below the rows a panel lists — has no row, and the folder holding
+   * it is the only thing on the map that stands for it. Anchoring rather than
+   * matching on the node's own file is what makes a neighbour hovered from the
+   * pane light anything at all.
+   */
+  const hoverAnchorId = useMemo(() => {
+    if (hoverPath === null) return null;
+    const file = files.find((candidate) => candidate.path === hoverPath);
+    if (file === undefined) return null;
+    return anchorForFile(graph, file)?.nodeId ?? null;
+  }, [files, graph, hoverPath]);
+
   const flowNodes = useMemo<Node[]>(
     () =>
       layout.nodes.map((node) => {
-        // A node is hovered when it stands for the file under the pointer. A folder
-        // node can stand for many files, so it matches when the pointer is on any
-        // of the files it holds.
-        const hovered = hoverPath !== null && node.file?.path === hoverPath;
+        const hovered = hoverAnchorId !== null && node.id === hoverAnchorId;
         const data: CanvasNodeViewData = {
           node,
           selected: selectedId === node.id,
@@ -326,7 +339,7 @@ function DependencyMapCanvas({ files, edges, fileFanIn, fileFanOut, fold, select
           data,
         };
       }),
-    [layout.nodes, selectedId, emphasis, hoverPath],
+    [layout.nodes, selectedId, emphasis, hoverAnchorId],
   );
 
   const flowEdges = useMemo<FlowEdge[]>(
