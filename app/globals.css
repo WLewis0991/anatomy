@@ -34,9 +34,23 @@
   /* Where a rule has to survive being looked at, not just seen. */
   --line-strong: #c9c9ce;
 
+  /* A node's outline is a shape you read the map by, not a divider between two
+     pieces of one panel, so it is a step heavier than any rule. At --line the box
+     around a node measured 1.27:1 against its own surface and disappeared. These
+     sit near 2.4:1 and 3.2:1 in both themes. */
+  --node-border: #a8a8b0;
+  --node-border-strong: #8f8f99;
+
   --accent: #2563eb;
   --incoming: #16a34a;
   --outgoing: #d97706;
+
+  --kind-typescript: #7c3aed;
+  --kind-javascript: #0e7490;
+  --kind-style: #be185d;
+  --kind-json: #4d7c0f;
+  --kind-other: var(--line-strong);
+
   color-scheme: light;
 }
 
@@ -52,9 +66,23 @@
   --line: #232329;
   --line-strong: #383840;
 
+  /* See the light theme. Dark mode is where this hurts most: --line there is 1.23:1
+     against --surface, so a node had no edge to speak of. A resting node needs to
+     be findable at a glance on a dark field without every box shouting, so these sit
+     near 3:1 and 3.9:1 rather than as low as they will go. */
+  --node-border: #64646f;
+  --node-border-strong: #70707c;
+
   --accent: #3b82f6;
   --incoming: #22c55e;
   --outgoing: #f59e0b;
+
+  --kind-typescript: #a78bfa;
+  --kind-javascript: #22d3ee;
+  --kind-style: #f472b6;
+  --kind-json: #a3e635;
+  --kind-other: var(--line-strong);
+
   color-scheme: dark;
 }
 
@@ -67,9 +95,16 @@
   --color-fg-muted: var(--fg-muted);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  --color-node-border: var(--node-border);
+  --color-node-border-strong: var(--node-border-strong);
   --color-accent: var(--accent);
   --color-incoming: var(--incoming);
   --color-outgoing: var(--outgoing);
+  --color-kind-typescript: var(--kind-typescript);
+  --color-kind-javascript: var(--kind-javascript);
+  --color-kind-style: var(--kind-style);
+  --color-kind-json: var(--kind-json);
+  --color-kind-other: var(--kind-other);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
