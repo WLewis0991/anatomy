@@ -8,6 +8,27 @@ import { createSupabaseClient } from "@/lib/supabase";
  */
 const LIST_LIMIT = 50;
 
+/**
+ * The stages a run passes through before it ends. A row still sitting in one of
+ * these has not finished, and — because there is no queue and no timeout — it may
+ * never finish. Ageing is the only signal that separates a working run from an
+ * abandoned one.
+ */
+const UNFINISHED_STAGES = new Set([
+  "pending",
+  "fetching",
+  "selecting",
+  "parsing",
+  "storing",
+]);
+
+/**
+ * How old an unfinished run gets before it reads stale. Long enough that a large
+ * repository still parsing is not libelled, short enough that an abandoned row is
+ * not mistaken for work in progress.
+ */
+const STALE_AFTER_MS = 5 * 60 * 1000;
+
 export interface AnalysisListItem {
   id: string;
   /** `owner/repo`, as it was normalised onto the project. */
@@ -15,6 +36,10 @@ export interface AnalysisListItem {
   /** The repository address as it was given, kept for the title attribute. */
   url: string;
   status: string;
+  /** The stage the run is in, or ended in. */
+  stage: string;
+  /** True when the run has not finished and is old enough to be presumed dead. */
+  stale: boolean;
   /** Why a run stopped, if it stopped. Null on every row that is not a failure. */
   errorDetail: string | null;
   /** ISO 8601. Rendered relative, with the absolute value in the title attribute. */
@@ -44,7 +69,7 @@ export async function listAnalyses(): Promise<AnalysisListResult> {
 
   const { data: analyses, error: analysesError } = await supabase
     .from("analyses")
-    .select("id, status, error_detail, created_at, project_id")
+    .select("id, status, stage, error_detail, created_at, project_id")
     .order("created_at", { ascending: false })
     .limit(LIST_LIMIT);
 
@@ -69,6 +94,7 @@ export async function listAnalyses(): Promise<AnalysisListResult> {
 
   const projectsById = new Map(projects.map((project) => [project.id, project]));
 
+  const now = Date.now();
   const rows: AnalysisListItem[] = [];
 
   for (const analysis of analyses) {
@@ -91,6 +117,10 @@ export async function listAnalyses(): Promise<AnalysisListResult> {
       repository: project.name,
       url: project.url,
       status: analysis.status,
+      stage: analysis.stage,
+      stale:
+        UNFINISHED_STAGES.has(analysis.stage) &&
+        now - new Date(analysis.created_at).getTime() > STALE_AFTER_MS,
       errorDetail: analysis.error_detail,
       createdAt: analysis.created_at,
     });

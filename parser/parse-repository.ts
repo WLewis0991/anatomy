@@ -40,15 +40,19 @@ export async function parseRepository(options: ParseOptions): Promise<ParseResul
   }
 
   const parsed = walk.files.filter((file) => !failedPaths.has(file.relativePath));
-  const files: ParsedFile[] = parsed.map((file) => ({
-    path: file.relativePath,
-    folder: file.folder,
-    extension: file.extension,
-    kind: adapter.describe({ path: file.relativePath, extension: file.extension }).kind,
-    lines: file.lines,
-    bytes: file.bytes,
-    hash: file.hash,
-  }));
+  const files: ParsedFile[] = parsed.map((file) => {
+    const described = adapter.describe({ path: file.relativePath, extension: file.extension });
+    return {
+      path: file.relativePath,
+      folder: file.folder,
+      extension: file.extension,
+      kind: described.kind,
+      reach: described.reach,
+      lines: file.lines,
+      bytes: file.bytes,
+      hash: file.hash,
+    };
+  });
 
   const resolver = await createResolver(
     root,

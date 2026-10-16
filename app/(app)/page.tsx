@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { auth } from "@clerk/nextjs/server";
+import Link from "next/link";
 
 import {
   BracesIcon,
@@ -11,6 +12,7 @@ import {
   SucceededIcon,
 } from "@/components/icons";
 import { listAnalyses, type AnalysisListItem } from "@/lib/queries";
+import { RepositoryForm } from "@/components/repository-form";
 
 // The query reads the session, so this route is never prerendered and a
 // navigation into it is allowed to wait.
@@ -55,6 +57,8 @@ export default async function WorkspacePage() {
           )}
         </p>
       </header>
+
+      <RepositoryForm />
 
       <Panel count={error ? null : rows.length}>
         {error ? (
@@ -116,14 +120,18 @@ function AnalysisTable({ rows }: { rows: AnalysisListItem[] }) {
       </thead>
       <tbody>
         {rows.map((row) => (
-          // Not a link and not clickable: nothing navigates from here yet, and a
-          // row that highlights on hover promises a destination that does not
-          // exist.
+          // The repository name carries the link rather than the row: a <tr>
+          // cannot wrap one, and the name is the row's identity. The state and
+          // the time beside it describe that analysis, they are not
+          // destinations of their own.
           <tr key={row.id} className="border-t border-line">
             <td className="max-w-0 truncate px-4 py-2">
-              <span className="block truncate font-medium text-fg">
+              <Link
+                href={`/analyses/${row.id}`}
+                className="block truncate font-medium text-fg hover:underline"
+              >
                 {row.repository}
-              </span>
+              </Link>
               <span className="block truncate font-mono text-xs text-fg-muted">
                 {row.url}
               </span>
@@ -131,8 +139,11 @@ function AnalysisTable({ rows }: { rows: AnalysisListItem[] }) {
             {/* The reason a run stopped, on the state rather than in a column of
                 its own: four identical lines of it would be noise, and one that
                 is worth reading is worth reading where the word is. */}
-            <td className="px-4 py-2" title={row.errorDetail ?? undefined}>
-              <StateBadge status={row.status} />
+            <td
+              className="px-4 py-2"
+              title={row.errorDetail ?? (row.stale ? `stuck in ${row.stage}` : undefined)}
+            >
+              <StateBadge status={row.status} stale={row.stale} />
             </td>
             <td
               className="px-4 py-2 text-right tabular-nums text-fg-muted"
@@ -155,6 +166,10 @@ function AnalysisTable({ rows }: { rows: AnalysisListItem[] }) {
  *
  * Anything the schema does not name renders as its own word with no glyph at
  * all, rather than borrowing one of the four.
+ *
+ * A run that has not finished and is old enough reads "stale" instead of the
+ * stage it is stuck in. The stage word on its own says a run is working when the
+ * only evidence is that it stopped; the stage stays reachable in the title.
  */
 const STATE_GLYPHS: Record<string, () => ReactNode> = {
   pending: PendingIcon,
@@ -163,15 +178,15 @@ const STATE_GLYPHS: Record<string, () => ReactNode> = {
   failed: FailedIcon,
 };
 
-function StateBadge({ status }: { status: string }) {
-  const Glyph = STATE_GLYPHS[status];
+function StateBadge({ status, stale }: { status: string; stale: boolean }) {
+  const Glyph = stale ? PendingIcon : STATE_GLYPHS[status];
 
   // The reference's pill, at its 24px, without its uppercase: the words here are
   // the schema's, and the schema is lowercase.
   return (
     <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-line pr-2 pl-1.5 text-xs text-fg leading-none">
       {Glyph ? <Glyph /> : null}
-      {status}
+      {stale ? "stale" : status}
     </span>
   );
 }

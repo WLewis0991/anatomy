@@ -87,6 +87,11 @@ export function CanvasNodeView({ data }: { data: CanvasNodeViewData }) {
         >
           <span className="truncate font-mono text-sm text-fg">{node.label}</span>
           <Counts count={node.fileCount} fanIn={node.fanIn} fanOut={node.fanOut} />
+          {node.matchCount > 0 && (
+            <span className="ml-1 font-mono text-xs tabular-nums text-accent" title={`${node.matchCount} of the active category here`}>
+              matched {node.matchCount}
+            </span>
+          )}
         </div>
 
         {/* Rows are child nodes laid out over this space, not content of it. */}

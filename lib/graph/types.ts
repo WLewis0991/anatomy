@@ -57,6 +57,18 @@ export interface CanvasNode {
   height: number;
   /** Panel id, for rows. */
   parentId: string | null;
+  /**
+   * Files this node holds directly that match the active category filter. Zero
+   * when no filter is on. Direct rather than inherited, so the panels across the
+   * map sum to the number the rail shows without counting a file twice.
+   */
+  matchCount: number;
+  /**
+   * Whether this node, or anything folded into it, holds a match. Used for dimming:
+   * a folder whose category all lives in a subfolder still belongs to the category,
+   * and dimming it would take the shape of the map with it.
+   */
+  containsMatch: boolean;
 }
 
 export interface CanvasEdge {

@@ -20,27 +20,39 @@ export type Database = {
     Tables: {
       analyses: {
         Row: {
+          coverage_json: Json | null
           created_at: string
           error_detail: string | null
+          head_sha: string | null
           id: string
           organization_id: string
           project_id: string
+          stage: string
+          stage_message: string | null
           status: string
         }
         Insert: {
+          coverage_json?: Json | null
           created_at?: string
           error_detail?: string | null
+          head_sha?: string | null
           id?: string
           organization_id: string
           project_id: string
+          stage?: string
+          stage_message?: string | null
           status?: string
         }
         Update: {
+          coverage_json?: Json | null
           created_at?: string
           error_detail?: string | null
+          head_sha?: string | null
           id?: string
           organization_id?: string
           project_id?: string
+          stage?: string
+          stage_message?: string | null
           status?: string
         }
         Relationships: [
@@ -252,7 +264,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          id: string
+          id?: string
           name: string
           organization_id: string
           url: string

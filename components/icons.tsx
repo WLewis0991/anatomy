@@ -121,3 +121,11 @@ export function DarkIcon() {
     </Glyph>
   );
 }
+
+export function PlusIcon({ size = 12 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <path d="M8 3.5v9M3.5 8h9" />
+    </Glyph>
+  );
+}
