@@ -100,7 +100,7 @@ export function DetailPane(props: DetailPaneProps) {
         ) : selection === null ? (
           <RepositorySummary {...props} />
         ) : selection.kind === "row" ? (
-          <FileDetail {...props} file={selection.file} />
+          <FileDetail key={selection.file.path} {...props} file={selection.file} />
         ) : (
           <FolderDetail {...props} />
         )}

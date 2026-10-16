@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { createWriteStream, createReadStream } from "node:fs";
 import { extract } from "tar";
@@ -118,64 +118,71 @@ export async function fetchRepository(
     throw new Error(describeGithubError(name, response));
   }
 
-  // Create a temporary directory for extraction
-  const tmpRoot = path.join(process.cwd(), "tmp", `repo-${createHash("sha256").update(name).digest("hex").slice(0, 12)}`);
-  await rm(tmpRoot, { recursive: true, force: true });
-  await mkdir(tmpRoot, { recursive: true });
-
-  // Download the tarball to a file first, then extract it
-  const tarballPath = path.join(tmpRoot, "repo.tar.gz");
-  const fileStream = createWriteStream(tarballPath);
-
-  // Convert Web ReadableStream to Node.js stream
+  // Validate the body before opening the write stream: a stream that already
+  // exists is a file a later throw would leave behind.
   if (!response.body) {
     throw new Error("Empty response body");
   }
 
+  // Each run gets its own directory under the OS temp directory. Deriving the
+  // name from the repository made two runs of the same repository collide, and
+  // the `rm`/`mkdir` that tried to clear the way was itself a race. `mkdtemp`
+  // creates a unique directory in one step.
+  const tmpRoot = await mkdtemp(path.join(tmpdir(), "anatomy-"));
+  const tarballPath = path.join(tmpRoot, "repo.tar.gz");
+  const fileStream = createWriteStream(tarballPath);
   const reader = response.body.getReader();
-  const writer = fileStream;
 
-  await new Promise<void>((resolve, reject) => {
-    writer.on("finish", resolve);
-    writer.on("error", reject);
+  try {
+    // Download the tarball to a file first, then extract it. `response.body` is
+    // a Web ReadableStream, so it is pumped into the Node write stream by hand.
+    await new Promise<void>((resolve, reject) => {
+      fileStream.on("finish", resolve);
+      fileStream.on("error", reject);
 
-    function pump(): void {
-      reader.read().then(({ done, value }) => {
-        if (done) {
-          writer.end();
-          return;
-        }
-        writer.write(value, (err) => {
-          if (err) {
-            reject(err);
+      function pump(): void {
+        reader.read().then(({ done, value }) => {
+          if (done) {
+            fileStream.end();
             return;
           }
-          pump();
-        });
-      }).catch(reject);
-    }
-    pump();
-  });
+          fileStream.write(value, (err) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            pump();
+          });
+        }).catch(reject);
+      }
+      pump();
+    });
 
-  // Extract into a dedicated subdirectory. `strip: 1` removes GitHub's
-  // `owner-repo-sha/` wrapper, so the repository's own files land directly in
-  // `content`. The tarball stays alongside it in `tmpRoot`, which is what
-  // `cleanupRepository` removes via the root's dirname.
-  const contentDir = path.join(tmpRoot, "content");
-  await mkdir(contentDir, { recursive: true });
+    // Extract into a dedicated subdirectory. `strip: 1` removes GitHub's
+    // `owner-repo-sha/` wrapper, so the repository's own files land directly in
+    // `content`. The tarball stays alongside it in `tmpRoot`, which is what
+    // `cleanupRepository` removes via the root's dirname.
+    const contentDir = path.join(tmpRoot, "content");
+    await mkdir(contentDir, { recursive: true });
 
-  await new Promise<void>((resolve, reject) => {
-    createReadStream(tarballPath)
-      .pipe(extract({ cwd: contentDir, strip: 1 }))
-      .on("finish", resolve)
-      .on("error", reject);
-  });
+    await new Promise<void>((resolve, reject) => {
+      createReadStream(tarballPath)
+        .pipe(extract({ cwd: contentDir, strip: 1 }))
+        .on("finish", resolve)
+        .on("error", reject);
+    });
 
-  return {
-    root: contentDir,
-    headSha,
-    name,
-  };
+    return {
+      root: contentDir,
+      headSha,
+      name,
+    };
+  } catch (error) {
+    // Cleanup in the caller only runs once a root is returned, so a failed
+    // download or extraction has to remove its own directory here or leak it.
+    await rm(tmpRoot, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 /**

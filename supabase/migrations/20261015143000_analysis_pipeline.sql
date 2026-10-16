@@ -1,6 +1,6 @@
 -- Phase 7: Analysis pipeline
--- Adds commit tracking, coverage storage, stage progression, and realtime channels
--- for live progress updates.
+-- Adds commit tracking, coverage storage, stage progression, and realtime
+-- progress over the analyses table.
 
 -- ---------------------------------------------------------------------------
 -- analyses: add head_sha and coverage_json
@@ -17,8 +17,8 @@ alter table public.analyses
   add column if not exists coverage_json jsonb;
 
 -- Stage progression for live progress. Values: 'fetching', 'selecting', 'parsing',
--- 'storing', 'succeeded', 'failed'. The runner updates this column and a trigger
--- publishes the change to the analysis's realtime channel.
+-- 'storing', 'succeeded', 'failed'. The runner updates this column; the change is
+-- published to realtime subscribers through the publication added below.
 alter table public.analyses
   add column if not exists stage text not null default 'pending'
     check (stage in ('pending', 'fetching', 'selecting', 'parsing', 'storing', 'succeeded', 'failed'));
@@ -33,54 +33,21 @@ create index if not exists analyses_stage_created_idx
   where stage in ('pending', 'fetching', 'selecting', 'parsing', 'storing');
 
 -- ---------------------------------------------------------------------------
--- Realtime: per-analysis channels
+-- Realtime: live progress over the analyses table
 -- ---------------------------------------------------------------------------
 
--- The channel pattern is declared here so it exists before anything publishes.
--- The trigger below publishes to `analysis:{analysis_id}`.
--- The policy on the channel mirrors the row policy: only the owning organization
--- may subscribe.
+-- Supabase Realtime drives `postgres_changes` subscribers from the
+-- `supabase_realtime` publication, so the table is added to it. There is no
+-- separate channel to register: the client's topic name is a local label, and
+-- delivery comes from the publication rather than from anything the database
+-- sends under that name. `pg_notify` belongs to a different mechanism and never
+-- reaches a `postgres_changes` subscription, so nothing here publishes by hand.
 --
--- Supabase realtime uses the `supabase_realtime` publication. We add the table
--- to it with `insert, update, delete` so stage changes are broadcast.
+-- Which rows reach a subscriber is decided by row-level security, the same
+-- policy that governs a direct select. A subscriber without the owning
+-- organization's claim is sent no rows, so the stream is protected exactly as
+-- the table is. Nothing filters on a channel name.
 alter publication supabase_realtime add table public.analyses;
-
--- The publication change above is enough for the channel to work. The subscription
--- filter on the client side (`filter=organization_id=eq.<org>`) enforces the
--- same isolation as the row-level security policy.
-
--- ---------------------------------------------------------------------------
--- Trigger: publish stage changes to the analysis channel
--- ---------------------------------------------------------------------------
-
--- We publish from a trigger on our own table, never by attaching to the realtime
--- machinery directly. The payload carries only the stage and message, not the
--- whole row — the progress page has nothing to filter and nothing to interpret.
-create or replace function public.notify_analysis_stage()
-returns trigger
-language plpgsql
-set search_path = ''
-as $$
-begin
-  if new.stage is distinct from old.stage
-     or new.stage_message is distinct from old.stage_message then
-    perform pg_notify(
-      'analysis:' || new.id::text,
-      jsonb_build_object(
-        'stage', new.stage,
-        'message', new.stage_message
-      )::text
-    );
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists trigger_notify_analysis_stage on public.analyses;
-create trigger trigger_notify_analysis_stage
-  after update of stage, stage_message on public.analyses
-  for each row
-  execute function public.notify_analysis_stage();
 
 -- ---------------------------------------------------------------------------
 -- Verify RLS is still enabled on all tables

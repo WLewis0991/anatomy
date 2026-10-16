@@ -122,9 +122,17 @@ export function StageDisplay({
         () => getTokenRef.current(),
       );
 
-      // No token, or the effect was torn down while the client was being built:
-      // there is nothing authenticated to subscribe with, and nothing to clean up.
-      if (!supabase || cancelled) return;
+      // No token: there is no authenticated socket to subscribe with, so live
+      // updates can never arrive. Say so rather than leaving the page on its
+      // initial stage forever. Nothing to clean up either way.
+      if (!supabase) {
+        if (!cancelled) setLiveUnavailable(true);
+        return;
+      }
+
+      // Torn down while the client was being built: nothing to subscribe, and
+      // nothing to clean up.
+      if (cancelled) return;
 
       const channel = supabase
         .channel(`analysis:${analysisId}`)

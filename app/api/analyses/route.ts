@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { after, NextRequest, NextResponse } from "next/server";
 
 import { createOrGetAnalysis, runAnalysisPipeline } from "@/lib/analysis-pipeline";
+import { normalizeRepositoryUrl } from "@/lib/fetch-repository";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const { orgId } = await auth.protect();
@@ -10,16 +11,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "No organization selected" }, { status: 401 });
   }
 
-  let url: string;
+  let body: unknown;
   try {
-    const body = await request.json();
-    url = body.url?.trim();
+    body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    typeof (body as { url?: unknown }).url !== "string"
+  ) {
+    return NextResponse.json(
+      { error: "Expected a JSON object with a string `url`" },
+      { status: 400 },
+    );
+  }
+
+  const url = (body as { url: string }).url.trim();
+
   if (!url) {
     return NextResponse.json({ error: "Repository URL is required" }, { status: 400 });
+  }
+
+  // A URL the parser cannot read is the caller's error, not a server failure:
+  // it fails here as a 400 rather than falling through to the 500 below.
+  try {
+    normalizeRepositoryUrl(url);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid repository URL";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 
   try {

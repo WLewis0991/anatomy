@@ -48,8 +48,15 @@ export async function runAnalysisPipeline(
     const { root, headSha } = await fetchRepository(repositoryUrl);
 
     try {
-      // Update head_sha
-      await supabase.from("analyses").update({ head_sha: headSha }).eq("id", analysisId);
+      // Update head_sha. A write that failed here has to stop the run: a row
+      // that records no commit cannot later tell whether the repository moved.
+      const { error: headShaError } = await supabase
+        .from("analyses")
+        .update({ head_sha: headSha })
+        .eq("id", analysisId);
+      if (headShaError) {
+        throw new Error(`Failed to record head SHA: ${headShaError.message}`);
+      }
 
       // Stage: parsing
       await updateStage("parsing", "Parsing source files...");
@@ -63,10 +70,13 @@ export async function runAnalysisPipeline(
 
       // Success
       await updateStage("succeeded", "Analysis complete");
-      await supabase
+      const { error: successError } = await supabase
         .from("analyses")
         .update({ status: "succeeded", stage: "succeeded", stage_message: "Analysis complete" })
         .eq("id", analysisId);
+      if (successError) {
+        throw new Error(`Failed to record success: ${successError.message}`);
+      }
 
       return { success: true };
     } finally {
@@ -76,10 +86,16 @@ export async function runAnalysisPipeline(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     await updateStage("failed", message);
-    await supabase
+    // The run is already failing; if the failure cannot be written down either,
+    // throw rather than return, so the caller never treats the row as settled
+    // when it is still sitting mid-stage.
+    const { error: failureError } = await supabase
       .from("analyses")
       .update({ status: "failed", stage: "failed", stage_message: message, error_detail: message })
       .eq("id", analysisId);
+    if (failureError) {
+      throw new Error(`Failed to record failure: ${failureError.message}`);
+    }
     return { success: false, error: message };
   }
 }
@@ -243,12 +259,20 @@ export async function createOrGetAnalysis(
   const supabase = createSupabaseClient();
   const name = normalizeRepositoryUrl(repositoryUrl);
 
-  // Try to find existing project
-  let { data: project } = await supabase
+  // Try to find existing project. `maybeSingle` distinguishes "no such project"
+  // from a query that failed: `.single()` reports both as an error and a null
+  // row, which would send a genuine failure down the create path.
+  const { data: existingProject, error: projectLookupError } = await supabase
     .from("projects")
     .select("id, organization_id")
     .eq("name", name)
-    .single();
+    .maybeSingle();
+
+  if (projectLookupError) {
+    throw new Error(`Failed to look up project: ${projectLookupError.message}`);
+  }
+
+  let project = existingProject;
 
   if (!project) {
     // Create new project
