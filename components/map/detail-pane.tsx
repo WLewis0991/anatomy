@@ -1,11 +1,13 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState } from "react";
 
 import type { Edge, ParsedFile } from "@/parser/types";
 import type { FoldNode } from "@/parser/folding";
 import type { Selection } from "@/lib/graph/types";
 import { countKindsIn, findFolder, summariseRepository } from "@/lib/graph/summary";
+import { blastRadius, dependencyChain, DEFAULT_DEPTH, type WalkResult } from "@/lib/graph/transitive";
+import { computeInsights } from "@/lib/graph/insights";
 import { kindLabel, SWATCH_CLASS } from "@/lib/kinds";
 
 /**
@@ -98,7 +100,7 @@ export function DetailPane(props: DetailPaneProps) {
         ) : selection === null ? (
           <RepositorySummary {...props} />
         ) : selection.kind === "row" ? (
-          <FileDetail {...props} file={selection.file} />
+          <FileDetail key={selection.file.path} {...props} file={selection.file} />
         ) : (
           <FolderDetail {...props} />
         )}
@@ -168,6 +170,8 @@ function RepositorySummary(props: DetailPaneProps) {
           </p>
         </Section>
       )}
+
+      <InsightsPanel files={files} edges={edges} />
     </div>
   );
 }
@@ -181,11 +185,51 @@ function frameworkLine(adapter: string): string {
   return adapter === "no-framework" ? "no framework detected" : `framework: ${adapter}`;
 }
 
+function InsightsPanel({ files, edges }: { files: readonly ParsedFile[]; edges: readonly Edge[] }) {
+  const insights = computeInsights(files, edges);
+  if (insights.list.length === 0) return null;
+
+  return (
+    <details className="mt-6">
+      <summary className="micro-label cursor-pointer select-none text-fg-muted">
+        Insights
+        {insights.truncated > 0 && <span className="ml-1.5 tabular-nums text-fg">({insights.truncated} more)</span>}
+      </summary>
+      <div className="mt-3 space-y-4 text-fg">
+        {insights.list.map((insight) => (
+          <Section key={insight.kind} title={insight.title} count={insight.total}>
+            <p className="mb-2 text-xs text-fg-muted">{insight.sentence}</p>
+            {insight.entries.length === 0 ? (
+              <Empty>None found.</Empty>
+            ) : (
+              <>
+                <PathList
+                  rows={insight.entries.map((entry) => ({ path: entry.path, count: null, kind: files.find((f) => f.path === entry.path)?.kind ?? null }))}
+                  hoverPath={null}
+                  onHover={() => {}}
+                  onSelectPath={() => {}}
+                />
+                <More total={insight.total} shown={insight.entries.length} />
+              </>
+            )}
+          </Section>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function FileDetail(props: DetailPaneProps & { file: ParsedFile }) {
-  const { file, edges } = props;
+  const { file, edges, files } = props;
   const pane = hoverProps(props);
   const outgoing = edges.filter((edge) => edge.from === file.path);
   const incoming = edges.filter((edge) => edge.to === file.path);
+
+  const [blast, setBlast] = useState<WalkResult | null>(null);
+  const [chain, setChain] = useState<WalkResult | null>(null);
+
+  const showBlast = () => setBlast(blastRadius(files, edges, file.path, DEFAULT_DEPTH));
+  const showChain = () => setChain(dependencyChain(files, edges, file.path, DEFAULT_DEPTH));
 
   return (
     <div className="space-y-4 text-fg">
@@ -197,8 +241,35 @@ function FileDetail(props: DetailPaneProps & { file: ParsedFile }) {
         </p>
       </div>
 
-      {/* The counts are the section headings. One number, one list, no second tally
-          that could disagree with the rows underneath it. */}
+      <div className="flex gap-2">
+        <button type="button" onClick={showBlast} className="rounded-[3px] px-2 py-1 text-xs border border-line bg-surface hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent">
+          Blast radius
+        </button>
+        <button type="button" onClick={showChain} className="rounded-[3px] px-2 py-1 text-xs border border-line bg-surface hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent">
+          Dependency chain
+        </button>
+      </div>
+
+      {blast && (
+        <Section title={`blast radius (${blast.reachedDepth} level${blast.reachedDepth === 1 ? "" : "s"})`} count={blast.paths.length}>
+          {blast.paths.length === 0 ? (
+            <Empty>Nothing in the repository depends on this.</Empty>
+          ) : (
+            <PathList rows={blast.paths.map((path) => ({ path, count: null, kind: files.find((f) => f.path === path)?.kind ?? null }))} {...pane} />
+          )}
+        </Section>
+      )}
+
+      {chain && (
+        <Section title={`dependency chain (${chain.reachedDepth} level${chain.reachedDepth === 1 ? "" : "s"})`} count={chain.paths.length}>
+          {chain.paths.length === 0 ? (
+            <Empty>Imports nothing inside the repository.</Empty>
+          ) : (
+            <PathList rows={chain.paths.map((path) => ({ path, count: null, kind: files.find((f) => f.path === path)?.kind ?? null }))} {...pane} />
+          )}
+        </Section>
+      )}
+
       <Section title="depends on" count={outgoing.length}>
         {outgoing.length === 0 ? (
           <Empty>Imports nothing inside the repository.</Empty>

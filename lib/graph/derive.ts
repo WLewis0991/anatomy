@@ -103,6 +103,32 @@ function measurePanelHeight(rowCount: number, hasOverflow: boolean): number {
   return Math.round(METRICS.panelHeaderHeight + rows + overflow + 8);
 }
 
+/** Matches held by this folder and nothing beneath it. */
+function directMatches(folder: FoldNode, matchPaths: ReadonlySet<string> | null): number {
+  if (matchPaths === null) return 0;
+  let count = 0;
+  for (const file of folder.files) {
+    if (matchPaths.has(file.path)) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Whether anything in this folder's whole folded subtree matches. Recursive
+ * because folding is recursive, and the depth is a directory's nesting rather
+ * than an import chain.
+ */
+function subtreeHasMatch(folder: FoldNode, matchPaths: ReadonlySet<string> | null): boolean {
+  if (matchPaths === null) return false;
+  for (const file of folder.files) {
+    if (matchPaths.has(file.path)) return true;
+  }
+  for (const child of folder.children) {
+    if (subtreeHasMatch(child, matchPaths)) return true;
+  }
+  return false;
+}
+
 export interface DeriveInput {
   root: FoldNode;
   /** Folder paths currently opened into panels. */
@@ -117,10 +143,17 @@ export interface DeriveInput {
   edges: readonly Edge[];
   fileFanIn: Readonly<Record<string, number>>;
   fileFanOut: Readonly<Record<string, number>>;
+  /**
+   * The files matching the rail's active category, or null when no category is
+   * active. Read for the per-node match counts only: it changes what a node says
+   * about itself, never where a node is, so the map does not move when a category
+   * is chosen.
+   */
+  matchPaths: ReadonlySet<string> | null;
 }
 
 export function deriveCanvas(input: DeriveInput): CanvasGraph {
-  const { root, openFolders, listedRows, edges, fileFanIn, fileFanOut } = input;
+  const { root, openFolders, listedRows, edges, fileFanIn, fileFanOut, matchPaths } = input;
 
   // Which folder holds each file, so an edge can be redirected to a row or the
   // folder that contains it.
@@ -165,11 +198,13 @@ export function deriveCanvas(input: DeriveInput): CanvasGraph {
         fileCount: folder.fileCount,
         fanIn,
         fanOut,
-        width: reservedWidth(folder, fanIn, fanOut, fileFanIn, fileFanOut),
+width: reservedWidth(folder, fanIn, fanOut, fileFanIn, fileFanOut),
         height: measureFolderHeight(fanIn),
         parentId: null,
+        matchCount: directMatches(folder, matchPaths),
+        containsMatch: subtreeHasMatch(folder, matchPaths),
       };
-nodes.push(node);
+      nodes.push(node);
         topLevel.push(node);
       return;
     }
@@ -196,6 +231,8 @@ nodes.push(node);
       width: reservedWidth(folder, fanIn, fanOut, fileFanIn, fileFanOut),
       height: measurePanelHeight(shown.length, overflow > 0),
       parentId: null,
+      matchCount: directMatches(folder, matchPaths),
+      containsMatch: subtreeHasMatch(folder, matchPaths),
     };
     nodes.push(panel);
     topLevel.push(panel);
@@ -220,6 +257,8 @@ nodes.push(node);
         width: 0,
         height: METRICS.panelRowHeight,
         parentId: panelId,
+        matchCount: matchPaths?.has(file.path) === true ? 1 : 0,
+        containsMatch: matchPaths?.has(file.path) === true,
       });
     });
   }

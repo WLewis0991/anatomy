@@ -13,6 +13,14 @@ export type ModuleKind =
   | "asset"
   | "other";
 
+/**
+ * How a file gets executed, for the files that nothing imports. An import graph
+ * cannot see the framework loading a page by name, or a consumer loading a
+ * package through its entry point, so the adapter records that separately.
+ * "none" means an ordinary file: if nothing imports it, that is a real finding.
+ */
+export type FileReach = "none" | "framework" | "entrypoint";
+
 export interface ParsedFile {
   /** Repository-relative, forward slashes. */
   path: string;
@@ -20,6 +28,7 @@ export interface ParsedFile {
   folder: string;
   extension: string;
   kind: ModuleKind;
+  reach: FileReach;
   lines: number;
   bytes: number;
   /** Hex digest of the contents, so a rerun can tell whether anything changed. */

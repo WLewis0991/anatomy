@@ -38,6 +38,7 @@ const graph = deriveCanvas({
   edges: result.edges,
   fileFanIn: result.fanIn,
   fileFanOut: result.fanOut,
+  matchPaths: null,
 });
 
 const layout = layoutCanvas(graph);
@@ -146,6 +147,7 @@ const openGraph = deriveCanvas({
   listedRows: {},
   fileFanIn: result.fanIn,
   fileFanOut: result.fanOut,
+  matchPaths: null,
 });
 const openLayout = layoutCanvas(openGraph);
 const openNodes = openLayout.nodes.filter((node) => !node.relative);
@@ -173,7 +175,7 @@ if (openDangling.length > 0) {
 
 /** The same data twice must place everything in the same spot. */
 const again = layoutCanvas(
-  deriveCanvas({ root: fold.root, openFolders: new Set(), listedRows: {}, edges: result.edges, fileFanIn: result.fanIn, fileFanOut: result.fanOut }),
+  deriveCanvas({ root: fold.root, openFolders: new Set(), listedRows: {}, edges: result.edges, fileFanIn: result.fanIn, fileFanOut: result.fanOut, matchPaths: null }),
 );
 const stable =
   again.nodes.length === layout.nodes.length &&
@@ -262,6 +264,7 @@ if (subject === undefined) {
     listedRows: {},
     fileFanIn: result.fanIn,
     fileFanOut: result.fanOut,
+    matchPaths: null,
   });
 
   const panel = opened.topLevel.find((node) => node.id === subject.id);
@@ -390,6 +393,7 @@ function checkOpeningHoldsStill(target: string, base: ReturnType<typeof layoutCa
       listedRows: {},
       fileFanIn: result.fanIn,
       fileFanOut: result.fanOut,
+      matchPaths: null,
     }),
   );
   const after = new Map(afterLayout.nodes.filter((node) => !node.relative).map((node) => [node.id, node]));
@@ -451,6 +455,7 @@ for (const [label, open] of openStates.slice(1)) {
       listedRows: {},
       fileFanIn: result.fanIn,
       fileFanOut: result.fanOut,
+      matchPaths: null,
     }),
   );
   const pairs = representedPairs(built.edges);
@@ -487,6 +492,7 @@ function checkExpansion(label: string, folderPath: string): boolean {
       edges: result.edges,
       fileFanIn: result.fanIn,
       fileFanOut: result.fanOut,
+      matchPaths: null,
     });
   const before = build(0);
   const beforeLayout = layoutCanvas(before);

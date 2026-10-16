@@ -174,26 +174,54 @@ function parentOf(root: FoldNode, path: string): FoldNode | null {
 }
 
 /**
- * The shortest prefix of each name that still tells it apart from its siblings.
- * Collisions are counted against the full sibling names, so the answer does not
- * depend on the order the siblings happen to be relabelled in.
+ * What each child folder is called on screen.
+ *
+ * The full directory name, so `components` reads as `components` rather than its
+ * first letter. A folder keeps that name unless folding has merged another folder
+ * of the same name into the same parent, and only then do the colliding pair fall
+ * back to the shortest tail of their paths that tells them apart — `web/utils`
+ * beside `core/utils`.
  */
 function relabel(node: FoldNode): void {
-  const names = node.children.map((child) => child.path.split("/").pop() ?? child.path);
-  node.children.forEach((child, index) => {
-    const name = names[index] ?? child.path;
-    let label = name;
-    for (let length = 1; length <= name.length; length += 1) {
-      const prefix = name.slice(0, length);
-      const collides = names.some((other, otherIndex) => otherIndex !== index && other.startsWith(prefix));
-      if (!collides) {
-        label = prefix;
-        break;
-      }
+  const byName = new Map<string, FoldNode[]>();
+  for (const child of node.children) {
+    const name = basenameOf(child.path);
+    const group = byName.get(name);
+    if (group === undefined) byName.set(name, [child]);
+    else group.push(child);
+  }
+
+  for (const [name, group] of byName) {
+    if (group.length === 1) {
+      for (const only of group) only.label = name;
+      continue;
     }
-    child.label = label;
-  });
+    const paths = group.map((child) => child.path);
+    for (const child of group) child.label = shortestUniqueSuffix(child.path, paths);
+  }
+
   for (const child of node.children) relabel(child);
+}
+
+function basenameOf(path: string): string {
+  return path.split("/").pop() ?? path;
+}
+
+/**
+ * The shortest run of `path`'s trailing segments that no other path in `others`
+ * shares. Only reached for siblings folding gave the same name, so it never
+ * shortens a name that was already unique.
+ */
+function shortestUniqueSuffix(path: string, others: readonly string[]): string {
+  const segments = path.split("/");
+  for (let take = 1; take <= segments.length; take += 1) {
+    const suffix = segments.slice(segments.length - take).join("/");
+    const collides = others.some(
+      (other) => other !== path && (other === suffix || other.endsWith(`/${suffix}`)),
+    );
+    if (!collides) return suffix;
+  }
+  return path;
 }
 
 export interface FoldOptions {
