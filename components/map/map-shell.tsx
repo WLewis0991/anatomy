@@ -7,14 +7,31 @@ export interface MapShellProps extends CategoryRailProps {
   detail?: ReactNode;
 }
 
-export function MapShell({ files, repositoryName, activeKind, onSelectKind, children, detail }: MapShellProps) {
+export function MapShell({
+  files,
+  analysisId,
+  repositoryName,
+  adapter,
+  roleByPath,
+  activeRole,
+  onSelectRole,
+  activeFacet,
+  onSelectFacet,
+  children,
+  detail,
+}: MapShellProps) {
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-ground">
       <CategoryRail
         files={files}
+        analysisId={analysisId}
         repositoryName={repositoryName}
-        activeKind={activeKind}
-        onSelectKind={onSelectKind}
+        adapter={adapter}
+        roleByPath={roleByPath}
+        activeRole={activeRole}
+        onSelectRole={onSelectRole}
+        activeFacet={activeFacet}
+        onSelectFacet={onSelectFacet}
       />
       <div className="min-w-0 flex-1 relative bg-ground" aria-label="Dependency map">
         {children}

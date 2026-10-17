@@ -18,6 +18,7 @@ export function kindLabel(kind: ModuleKind): string {
 export const SWATCH_CLASS: Record<ModuleKind, string> = {
   typescript: "bg-kind-typescript",
   javascript: "bg-kind-javascript",
+  python: "bg-kind-other",
   style: "bg-kind-style",
   json: "bg-kind-json",
   markdown: "bg-kind-other",

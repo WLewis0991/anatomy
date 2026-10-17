@@ -3,7 +3,6 @@ import "server-only";
 import { createSupabaseClient } from "@/lib/supabase";
 import { fetchRepository, cleanupRepository, normalizeRepositoryUrl } from "@/lib/fetch-repository";
 import { parseRepository } from "@/parser/parse-repository";
-import { fallbackAdapter } from "@/parser/adapter";
 import type { ParseResult, Coverage } from "@/parser/types";
 import type { Json } from "@/lib/database.types";
 
@@ -43,6 +42,15 @@ export async function runAnalysisPipeline(
   };
 
   try {
+    // Clear whatever a previous run of this analysis stored, before this one
+    // writes anything. A run is the whole description of the repository at one
+    // commit, so the row must never hold two runs' answers at once: without
+    // this, a re-run would insert a second set of files beside the first and
+    // the map would draw both. Clearing first rather than last also means a run
+    // that fails leaves the analysis empty and failed, rather than holding a
+    // result that no longer describes anything.
+    await resetForRun(supabase, analysisId);
+
     // Stage: fetching
     await updateStage("fetching", "Downloading repository archive...");
     const { root, headSha } = await fetchRepository(repositoryUrl);
@@ -61,7 +69,7 @@ export async function runAnalysisPipeline(
       // Stage: parsing
       await updateStage("parsing", "Parsing source files...");
 
-      const parseResult = await parseRepository({ root, adapter: fallbackAdapter });
+      const parseResult = await parseRepository({ root });
 
       // Stage: storing
       await updateStage("storing", "Storing files and dependencies...");
@@ -101,6 +109,62 @@ export async function runAnalysisPipeline(
 }
 
 /**
+ * Puts an analysis row back to the state a run starts from: no stored result,
+ * and no verdict left over from the previous one.
+ *
+ * `files` is the parent of the edges, explanations and file roles that point at
+ * it, and the schema already declares those cascade, so deleting the files is
+ * what removes them. The tables that hang off the analysis itself — the routes
+ * it recovered, the answers asked of it — have no parent to cascade from and
+ * are deleted here. Every table the parse feeds is therefore emptied, which is
+ * what lets the rest of this be an insert.
+ *
+ * Everything the previous run concluded goes too, including its status. A row
+ * still reading `failed` while a fresh run was working would show that run as
+ * already over, and an adapter or coverage figure left behind would name a
+ * parse that no longer exists.
+ *
+ * This is re-run bookkeeping and nothing else: writing a result is
+ * `storeAnalysisResult`, which only ever inserts.
+ */
+async function resetForRun(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  analysisId: string,
+): Promise<void> {
+  for (const table of ["routes", "insights"] as const) {
+    const { error } = await supabase.from(table).delete().eq("analysis_id", analysisId);
+    if (error) {
+      throw new Error(`Failed to clear ${table}: ${error.message}`);
+    }
+  }
+
+  const { error: filesError } = await supabase
+    .from("files")
+    .delete()
+    .eq("analysis_id", analysisId);
+  if (filesError) {
+    throw new Error(`Failed to clear files: ${filesError.message}`);
+  }
+
+  const { error: resetError } = await supabase
+    .from("analyses")
+    .update({
+      coverage_json: null,
+      adapter: null,
+      frontend: null,
+      head_sha: null,
+      status: "pending",
+      stage: "pending",
+      stage_message: null,
+      error_detail: null,
+    })
+    .eq("id", analysisId);
+  if (resetError) {
+    throw new Error(`Failed to reset the analysis: ${resetError.message}`);
+  }
+}
+
+/**
  * Stores the parse result in the database.
  */
 async function storeAnalysisResult(
@@ -109,12 +173,16 @@ async function storeAnalysisResult(
   organizationId: string,
   result: ParseResult,
 ): Promise<void> {
+  const roleByPath = new Map(result.roles.map((role) => [role.path, role.role]));
+
   // Insert files in batches. A large repository (thousands of files) makes a
   // single insert payload impractical and can exceed request limits.
   const fileInserts = result.files.map((file) => ({
     analysis_id: analysisId,
     organization_id: organizationId,
     path: file.path,
+    role: roleByPath.get(file.path) ?? null,
+    flags: file.flags,
   }));
 
   const insertedFiles: { id: string; path: string }[] = [];
@@ -155,11 +223,31 @@ async function storeAnalysisResult(
     }
   }
 
-  // Store coverage as JSON
+  // Insert routes in batches, after the files they describe.
+  const routeInserts = result.routes.map((route) => ({
+    analysis_id: analysisId,
+    organization_id: organizationId,
+    method: route.method,
+    path: route.path,
+  }));
+
+  for (const batch of chunk(routeInserts, INSERT_BATCH_SIZE)) {
+    const { error: routesError } = await supabase.from("routes").insert(batch);
+    if (routesError) {
+      throw new Error(`Failed to insert routes: ${routesError.message}`);
+    }
+  }
+
+  // Store coverage, and which language frontend and framework adapter
+  // classified the run, together so the row is never half-described.
   const coverageJson = coverageToJson(result.coverage) as Json;
   const { error: coverageError } = await supabase
     .from("analyses")
-    .update({ coverage_json: coverageJson })
+    .update({
+      coverage_json: coverageJson,
+      adapter: result.adapter,
+      frontend: result.frontend,
+    })
     .eq("id", analysisId);
 
   if (coverageError) {

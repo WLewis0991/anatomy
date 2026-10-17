@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { ModuleKind, ParsedFile, Edge, Coverage } from "@/parser/types";
+import type { Edge, FileFlag, ModuleKind, ParsedFile, Coverage, ExtractedRoute } from "@/parser/types";
 import { foldDirectories } from "@/parser/folding";
 import type { FoldResult } from "@/parser/folding";
 import type { Selection } from "@/lib/graph/types";
@@ -21,6 +21,8 @@ interface AnalysisClientProps {
     error_detail: string | null;
     head_sha: string | null;
     coverage_json: Database["public"]["Tables"]["analyses"]["Row"]["coverage_json"];
+    adapter: string | null;
+    frontend: string | null;
     project_id: string;
     created_at: string;
   };
@@ -29,16 +31,22 @@ interface AnalysisClientProps {
     name: string;
     url: string;
   };
-  files: Array<{ id: string; path: string }>;
+  files: Array<{ id: string; path: string; role: string | null; flags: string[] }>;
   edges: Array<{ id: string; from_file_id: string; to_file_id: string; kind: string; specifier: string }>;
+  routes: ExtractedRoute[];
 }
 
-export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdges }: AnalysisClientProps) {
+export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdges, routes }: AnalysisClientProps) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [tab, setTab] = useState<PaneTab>("structure");
   const [hoverPath, setHoverPath] = useState<string | null>(null);
-  const [activeKind, setActiveKind] = useState<ModuleKind | null>(null);
+  const [activeRole, setActiveRole] = useState<string | null>(null);
+  const [activeFacet, setActiveFacet] = useState<FileFlag | null>(null);
   const map = useRef<DependencyMapHandle | null>(null);
+
+  // What the parser decided about this repository. An analysis stored before
+  // this phase has neither, and reads as the generic fallback it was.
+  const adapter = analysis.adapter ?? "no-framework";
 
   // Convert database rows to parser types
   const parsedFiles = useMemo((): ParsedFile[] => {
@@ -51,7 +59,19 @@ export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdg
       lines: 0,
       bytes: 0,
       hash: "",
+      flags: f.flags.filter((flag): flag is FileFlag => flag === "test"),
     }));
+  }, [dbFiles]);
+
+  // The adapter assigned each file a role; the browser reports it, it does not
+  // re-derive it. A file with no stored role falls back to its language kind,
+  // which is exactly what the generic taxonomy names.
+  const roleByPath = useMemo((): Map<string, string> => {
+    const map = new Map<string, string>();
+    for (const f of dbFiles) {
+      if (f.role !== null) map.set(f.path, f.role);
+    }
+    return map;
   }, [dbFiles]);
 
   // We need a different approach - let's fetch file paths for edges
@@ -110,14 +130,31 @@ export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdg
     setHoverPath(null);
   }, []);
 
+  // A role and a facet answer two different questions about a file, so choosing
+  // one clears the other rather than leaving the map dimmed by both at once.
+  const handleSelectRole = useCallback((role: string | null) => {
+    setActiveRole(role);
+    if (role !== null) setActiveFacet(null);
+  }, []);
+
+  const handleSelectFacet = useCallback((facet: FileFlag | null) => {
+    setActiveFacet(facet);
+    if (facet !== null) setActiveRole(null);
+  }, []);
+
   return (
-    <div className="flex h-dvh flex-col bg-ground">
+    <div className="flex min-h-0 flex-1 flex-col bg-ground">
       <CoverageBanner coverage={coverage} />
       <MapShell
         files={parsedFiles}
+        analysisId={analysis.id}
         repositoryName={project.name}
-        activeKind={activeKind}
-        onSelectKind={setActiveKind}
+        adapter={adapter}
+        roleByPath={roleByPath}
+        activeRole={activeRole}
+        onSelectRole={handleSelectRole}
+        activeFacet={activeFacet}
+        onSelectFacet={handleSelectFacet}
         detail={
           <DetailPane
             selection={selection}
@@ -125,7 +162,9 @@ export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdg
             edges={resolvedEdges}
             root={fold.root}
             repositoryName={project.name}
-            adapter="no-framework"
+            adapter={adapter}
+            routes={routes}
+            roleByPath={roleByPath}
             tab={tab}
             onTabChange={setTab}
             hoverPath={hoverPath}
@@ -141,7 +180,9 @@ export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdg
           fileFanIn={fanIn}
           fileFanOut={fanOut}
           fold={fold}
-          activeKind={activeKind}
+          activeRole={activeRole}
+          activeFacet={activeFacet}
+          roleByPath={roleByPath}
           selection={selection}
           hoverPath={hoverPath}
           onSelect={handleSelect}
@@ -165,6 +206,8 @@ function inferKindFromPath(path: string): ModuleKind {
     case ".mjs":
     case ".cjs":
       return "javascript";
+    case ".py":
+      return "python";
     case ".css":
     case ".scss":
     case ".sass":
