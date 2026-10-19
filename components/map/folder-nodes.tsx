@@ -1,6 +1,6 @@
 "use client";
 
-import { Handle, Position } from "@reactflow/core";
+import { Handle, Position } from "reactflow";
 
 import { METRICS } from "@/lib/graph/types";
 import type { PositionedNode } from "@/lib/graph/layout";

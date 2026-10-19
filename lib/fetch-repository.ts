@@ -73,6 +73,74 @@ export function normalizeRepositoryUrl(input: string): string {
 }
 
 /**
+ * The repository's current HEAD commit, read without the archive. Used to answer
+ * "has this repository moved since the analysis" from the map page, where
+ * downloading a repository to answer that would be the wrong price.
+ */
+export async function fetchRepositoryHead(url: string, options: { token?: string } = {}): Promise<string> {
+  const name = normalizeRepositoryUrl(url);
+  const [owner, repo] = name.split("/");
+
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "anatomy",
+  };
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+
+  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/HEAD`, {
+    headers,
+    redirect: "follow",
+    cache: "no-store",
+    signal: AbortSignal.timeout(5_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(describeGithubError(name, response));
+  }
+
+  const commit = (await response.json()) as { sha?: unknown };
+  if (typeof commit.sha !== "string" || !/^[a-f0-9]{40}$/.test(commit.sha)) {
+    throw new Error(`Could not resolve commit SHA for ${name}`);
+  }
+  return commit.sha;
+}
+
+/**
+ * One file at one commit. The explanation is written from the code the map is
+ * describing, not from whatever the default branch says now.
+ *
+ * `ref` is the analysis's recorded commit. "HEAD" is only the fallback for rows
+ * analysed before commits were recorded; absent beats fetching an unknown
+ * version, so a caller that has no ref should prefer the fallback knowingly.
+ */
+export async function fetchRepositoryFile(
+  name: string,
+  ref: string,
+  filePath: string,
+  options: { token?: string } = {},
+): Promise<string> {
+  const encoded = filePath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  const headers: Record<string, string> = { "User-Agent": "anatomy" };
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+
+  const response = await fetch(`https://raw.githubusercontent.com/${name}/${ref}/${encoded}`, {
+    headers,
+    cache: "no-store",
+    signal: AbortSignal.timeout(8_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Could not read ${filePath} at ${ref}: ${response.status} ${response.statusText}`);
+  }
+
+  return response.text();
+}
+
+/**
  * Fetches a public GitHub repository as a tarball and extracts it to a temporary directory.
  * Returns the extracted root, the commit SHA (resolved from the API), and the normalized name.
  */

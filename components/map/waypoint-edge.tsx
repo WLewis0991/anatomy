@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { BaseEdge, type EdgeProps } from "@reactflow/core";
+import { BaseEdge, type EdgeProps } from "reactflow";
 
 import type { PositionedEdge } from "@/lib/graph/layout";
 

@@ -9,6 +9,8 @@ import { countKindsIn, findFolder, summariseRepository } from "@/lib/graph/summa
 import { blastRadius, dependencyChain, DEFAULT_DEPTH, type WalkResult } from "@/lib/graph/transitive";
 import { computeInsights } from "@/lib/graph/insights";
 import { kindLabel, SWATCH_CLASS } from "@/lib/kinds";
+import type { ExplanationSubjectKind, ExplanationView, FileRoleView } from "@/lib/ai/types";
+import { ExplanationText } from "./explanation-text";
 
 /**
  * The right-hand column.
@@ -44,6 +46,17 @@ export interface DetailPaneProps {
   hoverPath: string | null;
   onHover: (filePath: string | null) => void;
   onSelectPath: (filePath: string) => void;
+  rolesByPath: ReadonlyMap<string, FileRoleView>;
+  /** Explanation cache and request state for the current subject, held above the pane. */
+  explanation: ExplanationView | null;
+  explanationStale: boolean;
+  explanationBusy: boolean;
+  explanationError: string | null;
+  tracingEnabled: boolean;
+  paths: ReadonlySet<string>;
+  onExplain: (kind: ExplanationSubjectKind, path: string) => void;
+  onRerun: () => void;
+  reanalysisNote: string | null;
 }
 
 export function DetailPane(props: DetailPaneProps) {
@@ -96,7 +109,7 @@ export function DetailPane(props: DetailPaneProps) {
         className="min-h-0 flex-1 overflow-auto p-3 text-sm"
       >
         {tab === "explanation" ? (
-          <ExplanationEmpty subject={selection?.kind === "row" ? selection.file.path : null} />
+          <ExplanationPanel {...props} />
         ) : selection === null ? (
           <RepositorySummary {...props} />
         ) : selection.kind === "row" ? (
@@ -109,15 +122,98 @@ export function DetailPane(props: DetailPaneProps) {
   );
 }
 
-function ExplanationEmpty({ subject }: { subject: string | null }) {
+/**
+ * The explanation tab. The answer lives above the pane, keyed by subject, so
+ * leaving the tab or moving the selection and coming back does not lose it and
+ * does not ask the server again.
+ */
+function ExplanationPanel(props: DetailPaneProps) {
+  const { selection, explanation, explanationStale, explanationBusy, explanationError, tracingEnabled } = props;
+
+  if (selection === null) {
+    return (
+      <div className="space-y-1">
+        <p className="text-sm text-fg">Nothing selected.</p>
+        <p className="text-xs text-fg-muted">
+          Choose a file or a folded folder, then explain it. The answer is written from the edges the
+          parser resolved.
+        </p>
+      </div>
+    );
+  }
+
+  const kind: ExplanationSubjectKind = selection.kind === "row" ? "file" : "folder";
+  const path = selection.kind === "row" ? selection.file.path : selection.folderPath;
+  const label = selection.kind === "row" ? selection.file.path : selection.label;
+
   return (
-    <div className="space-y-1">
-      <p className="text-sm text-fg">No explanation yet.</p>
-      <p className="text-xs text-fg-muted">
-        Structure shows what the parser found. An explanation is written from that, and there is nothing
-        to write one from yet.
-      </p>
-      {subject !== null && <p className="pt-3 font-mono text-xs break-all text-fg-muted">{subject}</p>}
+    <div className="space-y-3 text-fg">
+      <div>
+        <p className="micro-label">{kind}</p>
+        <h2 className="font-mono text-sm break-all">{label}</h2>
+        {kind === "folder" && path !== "" && (
+          <p className="mt-0.5 font-mono text-xs break-all text-fg-muted">{path}</p>
+        )}
+      </div>
+
+      {!tracingEnabled && (
+        <p className="border-l-2 border-line pl-2 text-xs text-fg-muted">
+          AI tracing is off for this server. Add <span className="font-mono">LANGSMITH_API_KEY</span> to
+          record these calls.
+        </p>
+      )}
+
+      {explanationStale && (
+        <div className="space-y-1.5 border border-line bg-surface-2 p-2">
+          <p className="text-xs text-fg">
+            This explanation is stale. The repository has moved past the commit that was analysed.
+          </p>
+          <button
+            type="button"
+            onClick={props.onRerun}
+            className="rounded-[3px] border border-line bg-surface px-2 py-1 text-xs hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            Re-analyse repository
+          </button>
+          {props.reanalysisNote !== null && (
+            <p className="text-xs text-fg-muted">{props.reanalysisNote}</p>
+          )}
+        </div>
+      )}
+
+      {explanationError !== null && (
+        <p role="alert" className="text-xs text-fg">
+          {explanationError}
+        </p>
+      )}
+
+      {explanation !== null ? (
+        <div className="space-y-2">
+          <ExplanationText body={explanation.body} paths={props.paths} onSelectPath={props.onSelectPath} />
+          {explanationStale ? (
+            <p className="text-xs text-fg-muted">Shown from the previous commit until you re-analyse.</p>
+          ) : (
+            <button
+              type="button"
+              disabled={explanationBusy}
+              onClick={() => props.onExplain(kind, path)}
+              className="rounded-[3px] border border-line bg-surface px-2 py-1 text-xs hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Explain again
+            </button>
+          )}
+        </div>
+      ) : explanationBusy ? (
+        <p className="text-xs text-fg-muted">Writing an explanation from the parser&apos;s edges...</p>
+      ) : explanationStale ? null : (
+        <button
+          type="button"
+          onClick={() => props.onExplain(kind, path)}
+          className="rounded-[3px] border border-line bg-surface px-2 py-1 text-xs hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          Explain this {kind}
+        </button>
+      )}
     </div>
   );
 }
@@ -239,6 +335,11 @@ function FileDetail(props: DetailPaneProps & { file: ParsedFile }) {
         <p className="mt-1 text-xs text-fg-muted">
           {file.lines} lines &middot; {kindLabel(file.kind)}
         </p>
+        {props.rolesByPath.get(file.path) !== undefined && (
+          <p className="mt-0.5 text-xs text-fg-muted">
+            role: <span className="font-mono text-fg">{props.rolesByPath.get(file.path)?.role}</span>
+          </p>
+        )}
       </div>
 
       <div className="flex gap-2">

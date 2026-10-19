@@ -1,0 +1,16 @@
+{
+  "name": "deep-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types --env-file=.env index.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.0.0",
+    "@langchain/openrouter": "^0.4.17",
+    "deepagents": "^1.15.1",
+    "langchain": "^1.5.18",
+    "zod": "^4.0.0"
+  }
+}

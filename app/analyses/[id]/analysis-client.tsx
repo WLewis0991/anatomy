@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ModuleKind, ParsedFile, Edge, Coverage } from "@/parser/types";
 import { foldDirectories } from "@/parser/folding";
-import type { FoldResult } from "@/parser/folding";
+import type { FoldNode, FoldResult } from "@/parser/folding";
 import type { Selection } from "@/lib/graph/types";
 
 import { MapShell } from "@/components/map/map-shell";
@@ -11,6 +11,12 @@ import { DependencyMap, type DependencyMapHandle } from "@/components/map/depend
 import { DetailPane, type PaneTab } from "@/components/map/detail-pane";
 
 import type { Database } from "@/lib/database.types";
+import type {
+  ExplanationResponsePayload,
+  ExplanationSubjectKind,
+  ExplanationView,
+  FileRoleView,
+} from "@/lib/ai/types";
 
 interface AnalysisClientProps {
   analysis: {
@@ -20,6 +26,7 @@ interface AnalysisClientProps {
     stage_message: string | null;
     error_detail: string | null;
     head_sha: string | null;
+    adapter: string | null;
     coverage_json: Database["public"]["Tables"]["analyses"]["Row"]["coverage_json"];
     project_id: string;
     created_at: string;
@@ -31,13 +38,33 @@ interface AnalysisClientProps {
   };
   files: Array<{ id: string; path: string }>;
   edges: Array<{ id: string; from_file_id: string; to_file_id: string; kind: string; specifier: string }>;
+  roles: Array<{ file_id: string; role: string; source: string }>;
+  tracingEnabled: boolean;
 }
 
-export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdges }: AnalysisClientProps) {
+interface ExplanationSlot {
+  explanation: ExplanationView | null;
+  stale: boolean;
+  error: string | null;
+}
+
+export function AnalysisClient({
+  analysis,
+  project,
+  files: dbFiles,
+  edges: dbEdges,
+  roles,
+  tracingEnabled,
+}: AnalysisClientProps) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [tab, setTab] = useState<PaneTab>("structure");
   const [hoverPath, setHoverPath] = useState<string | null>(null);
   const [activeKind, setActiveKind] = useState<ModuleKind | null>(null);
+  // The explanation cache the user can feel. Keyed by subject, not by tab: this
+  // is what makes moving away and back instant without a second request.
+  const [explanations, setExplanations] = useState<Record<string, ExplanationSlot>>({});
+  const [explanationBusyKey, setExplanationBusyKey] = useState<string | null>(null);
+  const [reanalysisNote, setReanalysisNote] = useState<string | null>(null);
   const map = useRef<DependencyMapHandle | null>(null);
 
   // Convert database rows to parser types
@@ -62,6 +89,16 @@ export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdg
     return map;
   }, [dbFiles]);
 
+  const rolesByPath = useMemo((): ReadonlyMap<string, FileRoleView> => {
+    const byPath = new Map<string, FileRoleView>();
+    for (const role of roles) {
+      const path = fileIdToPath.get(role.file_id);
+      if (path === undefined) continue;
+      byPath.set(path, { role: role.role, source: role.source });
+    }
+    return byPath;
+  }, [roles, fileIdToPath]);
+
   const resolvedEdges = useMemo((): Edge[] => {
     return dbEdges
       .map((e) => {
@@ -84,6 +121,19 @@ export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdg
       rootLabel: project.name.split("/").pop() ?? "root",
     });
   }, [parsedFiles, project.name]);
+
+  // Every real file and folded folder path. Explanation links only move to these.
+  const paths = useMemo((): ReadonlySet<string> => {
+    const set = new Set<string>();
+    for (const file of dbFiles) set.add(file.path);
+
+    const visit = (node: FoldNode): void => {
+      if (node.path !== "") set.add(node.path);
+      for (const child of node.children) visit(child);
+    };
+    visit(fold.root);
+    return set;
+  }, [dbFiles, fold.root]);
 
   const coverage = useMemo(() => {
     return analysis.coverage_json as Coverage | null;
@@ -110,6 +160,89 @@ export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdg
     setHoverPath(null);
   }, []);
 
+  const requestExplanation = useCallback(
+    async (kind: ExplanationSubjectKind, path: string) => {
+      const key = `${kind}:${path}`;
+      setExplanationBusyKey(key);
+      setExplanations((current) => ({
+        ...current,
+        [key]: {
+          explanation: current[key]?.explanation ?? null,
+          stale: current[key]?.stale ?? false,
+          error: null,
+        },
+      }));
+
+      try {
+        const response = await fetch(`/api/analyses/${analysis.id}/explain`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind, path }),
+        });
+
+        const payload = (await response.json()) as
+          | ExplanationResponsePayload
+          | { error?: unknown };
+
+        if (!response.ok) {
+          const message =
+            typeof (payload as { error?: unknown }).error === "string"
+              ? (payload as { error: string }).error
+              : "Could not explain this subject.";
+          throw new Error(message);
+        }
+
+        const result = payload as ExplanationResponsePayload;
+        setExplanations((current) => ({
+          ...current,
+          [key]: {
+            explanation: result.explanation,
+            stale: result.stale,
+            error: null,
+          },
+        }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not explain this subject.";
+        setExplanations((current) => ({
+          ...current,
+          [key]: {
+            explanation: current[key]?.explanation ?? null,
+            stale: current[key]?.stale ?? false,
+            error: message,
+          },
+        }));
+      } finally {
+        setExplanationBusyKey(null);
+      }
+    },
+    [analysis.id],
+  );
+
+  const rerunAnalysis = useCallback(async () => {
+    setReanalysisNote("Starting re-analysis...");
+    try {
+      const response = await fetch(`/api/analyses/${analysis.id}/rerun`, { method: "POST" });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+        const message =
+          typeof payload?.error === "string" ? payload.error : "Could not start re-analysis.";
+        setReanalysisNote(message);
+        return;
+      }
+      setReanalysisNote("Re-analysis queued. Reload this page when it finishes.");
+    } catch {
+      setReanalysisNote("Could not start re-analysis.");
+    }
+  }, [analysis.id]);
+
+  const selectionKey =
+    selection === null
+      ? null
+      : selection.kind === "row"
+        ? `file:${selection.file.path}`
+        : `folder:${selection.folderPath}`;
+  const currentExplanation = selectionKey === null ? null : explanations[selectionKey] ?? null;
+
   return (
     <div className="flex h-dvh flex-col bg-ground">
       <CoverageBanner coverage={coverage} />
@@ -125,12 +258,22 @@ export function AnalysisClient({ analysis, project, files: dbFiles, edges: dbEdg
             edges={resolvedEdges}
             root={fold.root}
             repositoryName={project.name}
-            adapter="no-framework"
+            adapter={analysis.adapter ?? "no-framework"}
             tab={tab}
             onTabChange={setTab}
             hoverPath={hoverPath}
             onHover={setHoverPath}
-            onSelectPath={(path) => map.current?.selectFile(path)}
+            onSelectPath={(path) => map.current?.selectPath(path)}
+            rolesByPath={rolesByPath}
+            explanation={currentExplanation?.explanation ?? null}
+            explanationStale={currentExplanation?.stale ?? false}
+            explanationBusy={selectionKey !== null && explanationBusyKey === selectionKey}
+            explanationError={currentExplanation?.error ?? null}
+            tracingEnabled={tracingEnabled}
+            paths={paths}
+            onExplain={requestExplanation}
+            onRerun={rerunAnalysis}
+            reanalysisNote={reanalysisNote}
           />
         }
       >

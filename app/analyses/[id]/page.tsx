@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { env } from "@/lib/env";
 import type { Database } from "@/lib/database.types";
 import { AnalysisClient } from "./analysis-client";
+import { tracingConfigured } from "@/lib/ai/config";
 
 // This route uses dynamic data (auth, database), so it cannot be prerendered.
 export const instant = false;
@@ -31,7 +32,7 @@ export default async function AnalysisPage({
 
   const { data: analysis, error: analysisError } = await supabase
     .from("analyses")
-    .select("id, status, stage, stage_message, error_detail, head_sha, coverage_json, project_id, created_at")
+    .select("id, status, stage, stage_message, error_detail, head_sha, adapter, coverage_json, project_id, created_at")
     .eq("id", id)
     .single();
 
@@ -72,6 +73,22 @@ export default async function AnalysisPage({
     }
   }
 
+  // Roles hang off files rather than the analysis, so they are read after the
+  // file ids are known. One chunked read, not a query per file.
+  const roles: Array<{ file_id: string; role: string; source: string }> = [];
+  for (let index = 0; index < files.length; index += 200) {
+    const ids = files.slice(index, index + 200).map((file) => file.id);
+    const { data, error } = await supabase
+      .from("file_roles")
+      .select("file_id, role, source")
+      .in("file_id", ids);
+
+    if (error) {
+      notFound();
+    }
+    roles.push(...(data ?? []));
+  }
+
   const edges: {
     id: string;
     from_file_id: string;
@@ -103,6 +120,8 @@ export default async function AnalysisPage({
       project={project}
       files={files}
       edges={edges}
+      roles={roles}
+      tracingEnabled={tracingConfigured()}
     />
   );
 }

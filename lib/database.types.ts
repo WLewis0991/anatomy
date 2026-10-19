@@ -20,9 +20,11 @@ export type Database = {
     Tables: {
       analyses: {
         Row: {
+          adapter: string | null
           coverage_json: Json | null
           created_at: string
           error_detail: string | null
+          frontend: string | null
           head_sha: string | null
           id: string
           organization_id: string
@@ -32,9 +34,11 @@ export type Database = {
           status: string
         }
         Insert: {
+          adapter?: string | null
           coverage_json?: Json | null
           created_at?: string
           error_detail?: string | null
+          frontend?: string | null
           head_sha?: string | null
           id?: string
           organization_id: string
@@ -44,9 +48,11 @@ export type Database = {
           status?: string
         }
         Update: {
+          adapter?: string | null
           coverage_json?: Json | null
           created_at?: string
           error_detail?: string | null
+          frontend?: string | null
           head_sha?: string | null
           id?: string
           organization_id?: string
@@ -120,21 +126,33 @@ export type Database = {
       explanations: {
         Row: {
           body: string
+          created_at: string
           file_id: string
+          head_sha: string | null
           id: string
+          model: string | null
           organization_id: string
+          subject_hash: string | null
         }
         Insert: {
           body: string
+          created_at?: string
           file_id: string
+          head_sha?: string | null
           id?: string
+          model?: string | null
           organization_id: string
+          subject_hash?: string | null
         }
         Update: {
           body?: string
+          created_at?: string
           file_id?: string
+          head_sha?: string | null
           id?: string
+          model?: string | null
           organization_id?: string
+          subject_hash?: string | null
         }
         Relationships: [
           {
@@ -150,23 +168,29 @@ export type Database = {
         Row: {
           file_id: string
           id: string
+          model: string | null
           organization_id: string
           role: string
           source: string
+          subject_hash: string | null
         }
         Insert: {
           file_id: string
           id?: string
+          model?: string | null
           organization_id: string
           role: string
           source?: string
+          subject_hash?: string | null
         }
         Update: {
           file_id?: string
           id?: string
+          model?: string | null
           organization_id?: string
           role?: string
           source?: string
+          subject_hash?: string | null
         }
         Relationships: [
           {
@@ -181,25 +205,78 @@ export type Database = {
       files: {
         Row: {
           analysis_id: string
+          flags: string[]
+          hash: string | null
           id: string
           organization_id: string
           path: string
+          role: string | null
         }
         Insert: {
           analysis_id: string
+          flags?: string[]
+          hash?: string | null
           id?: string
           organization_id: string
           path: string
+          role?: string | null
         }
         Update: {
           analysis_id?: string
+          flags?: string[]
+          hash?: string | null
           id?: string
           organization_id?: string
           path?: string
+          role?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "files_analysis_id_organization_id_fkey"
+            columns: ["analysis_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
+      folder_explanations: {
+        Row: {
+          analysis_id: string
+          body: string
+          created_at: string
+          folder_path: string
+          head_sha: string | null
+          id: string
+          model: string
+          organization_id: string
+          subject_hash: string
+        }
+        Insert: {
+          analysis_id: string
+          body: string
+          created_at?: string
+          folder_path: string
+          head_sha?: string | null
+          id?: string
+          model: string
+          organization_id: string
+          subject_hash: string
+        }
+        Update: {
+          analysis_id?: string
+          body?: string
+          created_at?: string
+          folder_path?: string
+          head_sha?: string | null
+          id?: string
+          model?: string
+          organization_id?: string
+          subject_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "folder_explanations_analysis_id_organization_id_fkey"
             columns: ["analysis_id", "organization_id"]
             isOneToOne: false
             referencedRelation: "analyses"

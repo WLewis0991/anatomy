@@ -6,6 +6,7 @@ import { parseRepository } from "@/parser/parse-repository";
 import { fallbackAdapter } from "@/parser/adapter";
 import type { ParseResult, Coverage } from "@/parser/types";
 import type { Json } from "@/lib/database.types";
+import { assignUnidentifiedRoles } from "@/lib/ai/roles";
 
 export type AnalysisStage = "pending" | "fetching" | "parsing" | "storing" | "succeeded" | "failed";
 
@@ -43,6 +44,11 @@ export async function runAnalysisPipeline(
   };
 
   try {
+    // A run is the whole description of the repository at one commit, so the
+    // previous answer is cleared before this one starts. Without this a re-run
+    // inserts a second set of files beside the first and the map draws both.
+    await resetForRun(supabase, analysisId);
+
     // Stage: fetching
     await updateStage("fetching", "Downloading repository archive...");
     const { root, headSha } = await fetchRepository(repositoryUrl);
@@ -66,7 +72,34 @@ export async function runAnalysisPipeline(
       // Stage: storing
       await updateStage("storing", "Storing files and dependencies...");
 
-      await storeAnalysisResult(supabase, analysisId, organizationId, parseResult);
+      const stored = await storeAnalysisResult(supabase, analysisId, organizationId, parseResult);
+
+      const { error: adapterError } = await supabase
+        .from("analyses")
+        .update({ adapter: parseResult.adapter })
+        .eq("id", analysisId);
+      if (adapterError) {
+        throw new Error(`Failed to record adapter: ${adapterError.message}`);
+      }
+
+      // Roles are an explanation of files convention could not name. They are
+      // not part of the graph, so a missing key or a failed model call must not
+      // fail a parse that otherwise produced a complete map. It is reported in
+      // the pane as no role rather than quietly guessed at here.
+      await assignUnidentifiedRoles({
+        organizationId,
+        analysisId,
+        candidates: parseResult.files
+          .filter((file) => file.kind === "other")
+          .flatMap((file) => {
+            const id = stored.fileIdByPath.get(file.path);
+            return id === undefined
+              ? []
+              : [{ fileId: id, path: file.path, hash: file.hash }];
+          }),
+      }).catch((error: unknown) => {
+        console.error("Role assignment failed:", error);
+      });
 
       // Success
       await updateStage("succeeded", "Analysis complete");
@@ -101,6 +134,49 @@ export async function runAnalysisPipeline(
 }
 
 /**
+ * Puts an analysis row back to the state a run starts from: no stored result and
+ * no verdict left over from the previous one.
+ *
+ * `files` is the parent of edges, explanations and file roles, and those cascade
+ * from it. Tables hanging off the analysis itself are deleted explicitly.
+ */
+async function resetForRun(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  analysisId: string,
+): Promise<void> {
+  for (const table of ["routes", "insights", "folder_explanations"] as const) {
+    const { error } = await supabase.from(table).delete().eq("analysis_id", analysisId);
+    if (error) {
+      throw new Error(`Failed to clear ${table}: ${error.message}`);
+    }
+  }
+
+  const { error: filesError } = await supabase
+    .from("files")
+    .delete()
+    .eq("analysis_id", analysisId);
+  if (filesError) {
+    throw new Error(`Failed to clear files: ${filesError.message}`);
+  }
+
+  const { error: resetError } = await supabase
+    .from("analyses")
+    .update({
+      coverage_json: null,
+      adapter: null,
+      head_sha: null,
+      status: "pending",
+      stage: "pending",
+      stage_message: null,
+      error_detail: null,
+    })
+    .eq("id", analysisId);
+  if (resetError) {
+    throw new Error(`Failed to reset the analysis: ${resetError.message}`);
+  }
+}
+
+/**
  * Stores the parse result in the database.
  */
 async function storeAnalysisResult(
@@ -108,13 +184,14 @@ async function storeAnalysisResult(
   analysisId: string,
   organizationId: string,
   result: ParseResult,
-): Promise<void> {
+): Promise<{ fileIdByPath: Map<string, string> }> {
   // Insert files in batches. A large repository (thousands of files) makes a
   // single insert payload impractical and can exceed request limits.
   const fileInserts = result.files.map((file) => ({
     analysis_id: analysisId,
     organization_id: organizationId,
     path: file.path,
+    hash: file.hash,
   }));
 
   const insertedFiles: { id: string; path: string }[] = [];
@@ -165,6 +242,8 @@ async function storeAnalysisResult(
   if (coverageError) {
     throw new Error(`Failed to store coverage: ${coverageError.message}`);
   }
+
+  return { fileIdByPath };
 }
 
 /** Rows per insert. Keeps a large repository within a sane request size. */

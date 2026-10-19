@@ -13,7 +13,7 @@ import "reactflow/dist/style.css";
 
 import type { Edge, ModuleKind, ParsedFile } from "@/parser/types";
 import { folderHoldingFile, type FoldResult } from "@/parser/folding";
-import { anchorForFile, deriveCanvas, rowId, rowLabel, ROWS_PER_STEP } from "@/lib/graph/derive";
+import { anchorForFile, deriveCanvas, folderNodeId, rowId, rowLabel, ROWS_PER_STEP } from "@/lib/graph/derive";
 import { layoutCanvas, type PositionedNode } from "@/lib/graph/layout";
 import { computeEmphasis } from "@/lib/graph/emphasis";
 import type { Selection } from "@/lib/graph/types";
@@ -49,6 +49,8 @@ export interface DependencyMapProps {
 export interface DependencyMapHandle {
   /** Selects a file, opening whatever it takes to put that file on the canvas. */
   selectFile: (path: string) => void;
+  /** Selects a file or a folded folder by path, whichever the path names. */
+  selectPath: (path: string) => void;
 }
 
 const FIT_PADDING = 0.1;
@@ -240,7 +242,37 @@ function DependencyMapCanvas({
     [files, fold.root, focusOn, onSelect],
   );
 
-  useImperativeHandle(ref, () => ({ selectFile }), [selectFile]);
+  const selectFolder = useCallback(
+    (path: string) => {
+      const node = graph.byId.get(folderNodeId(path));
+      if (node === undefined) return;
+      focusOn(node.id);
+      onSelect({
+        kind: "folder",
+        id: node.id,
+        folderPath: node.folderPath,
+        label: node.label,
+      });
+    },
+    [focusOn, graph.byId, onSelect],
+  );
+
+  /**
+   * Explanation prose names both files and folders. The pane asks for a path and
+   * the map decides which kind it is; a path that names neither changes nothing.
+   */
+  const selectPath = useCallback(
+    (path: string) => {
+      if (files.some((file) => file.path === path)) {
+        selectFile(path);
+      } else {
+        selectFolder(path);
+      }
+    },
+    [files, selectFile, selectFolder],
+  );
+
+  useImperativeHandle(ref, () => ({ selectFile, selectPath }), [selectFile, selectPath]);
 
   /**
    * React Flow only lets a node take pointer events when it is selectable,
@@ -340,7 +372,7 @@ function DependencyMapCanvas({
       layout.nodes.map((node) => {
         const hovered = hoverAnchorId !== null && node.id === hoverAnchorId;
         const dimmedBySelection = selectedId !== null && !emphasis.nodeIds.has(node.id);
-        const dimmedByCategory = activeKind !== null && !node.containsMatch;
+        const dimmedByCategory = matchPaths !== null && !node.containsMatch;
         const data: CanvasNodeViewData = {
           node,
           selected: selectedId === node.id,
@@ -365,7 +397,7 @@ function DependencyMapCanvas({
           data,
         };
       }),
-    [layout.nodes, selectedId, emphasis, hoverAnchorId, activeKind],
+    [layout.nodes, selectedId, emphasis, hoverAnchorId, matchPaths],
   );
 
   const flowEdges = useMemo<FlowEdge[]>(
