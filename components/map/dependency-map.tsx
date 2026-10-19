@@ -11,7 +11,7 @@ import {
 } from "reactflow";
 import "reactflow/dist/style.css";
 
-import type { Edge, ModuleKind, ParsedFile } from "@/parser/types";
+import type { Edge, FileFlag, ParsedFile } from "@/parser/types";
 import { folderHoldingFile, type FoldResult } from "@/parser/folding";
 import { anchorForFile, deriveCanvas, rowId, rowLabel, ROWS_PER_STEP } from "@/lib/graph/derive";
 import { layoutCanvas, type PositionedNode } from "@/lib/graph/layout";
@@ -26,8 +26,15 @@ export interface DependencyMapProps {
   fileFanIn: Readonly<Record<string, number>>;
   fileFanOut: Readonly<Record<string, number>>;
   fold: FoldResult;
-  /** The category the rail is highlighting, or null when all are. */
-  activeKind: ModuleKind | null;
+  /** The role the rail is highlighting, or null when all are. */
+  activeRole: string | null;
+  /**
+   * The facet the rail is highlighting, or null. A role and a facet are two
+   * different questions about a file, so at most one is ever set.
+   */
+  activeFacet: FileFlag | null;
+  /** Each file's role, as the adapter reported it. */
+  roleByPath: ReadonlyMap<string, string>;
   /**
    * The one selection. It lives above the map because the pane both reads it and
    * moves it, and two copies of it cannot both be right.
@@ -95,7 +102,9 @@ function DependencyMapCanvas({
   fileFanIn,
   fileFanOut,
   fold,
-  activeKind,
+  activeRole,
+  activeFacet,
+  roleByPath,
   selection,
   hoverPath,
   onSelect,
@@ -123,14 +132,23 @@ function DependencyMapCanvas({
   // The rail's category, as the set of files it names. The graph depends only on the
   // fold, what is open and what matches: selecting a file and choosing a category
   // both change what is drawn, never where anything sits, so the layout cannot shift
-  // under a click.
-  const matchPaths = useMemo(
-    () =>
-      activeKind === null
-        ? null
-        : new Set(files.filter((file) => file.kind === activeKind).map((file) => file.path)),
-    [activeKind, files],
-  );
+  // under a click. A facet is answered the same way, from what the parser recorded
+  // rather than anything re-derived here.
+  const matchPaths = useMemo(() => {
+    if (activeRole !== null) {
+      return new Set(
+        files
+          .filter((file) => (roleByPath.get(file.path) ?? file.kind) === activeRole)
+          .map((file) => file.path),
+      );
+    }
+    if (activeFacet !== null) {
+      return new Set(
+        files.filter((file) => file.flags.includes(activeFacet)).map((file) => file.path),
+      );
+    }
+    return null;
+  }, [activeRole, activeFacet, files, roleByPath]);
 
   const graph = useMemo(
     () => deriveCanvas({ root: fold.root, openFolders, listedRows, edges, fileFanIn, fileFanOut, matchPaths }),
@@ -340,7 +358,7 @@ function DependencyMapCanvas({
       layout.nodes.map((node) => {
         const hovered = hoverAnchorId !== null && node.id === hoverAnchorId;
         const dimmedBySelection = selectedId !== null && !emphasis.nodeIds.has(node.id);
-        const dimmedByCategory = activeKind !== null && !node.containsMatch;
+        const dimmedByCategory = activeRole !== null && !node.containsMatch;
         const data: CanvasNodeViewData = {
           node,
           selected: selectedId === node.id,
@@ -365,7 +383,7 @@ function DependencyMapCanvas({
           data,
         };
       }),
-    [layout.nodes, selectedId, emphasis, hoverAnchorId, activeKind],
+    [layout.nodes, selectedId, emphasis, hoverAnchorId, activeRole],
   );
 
   const flowEdges = useMemo<FlowEdge[]>(

@@ -21,8 +21,10 @@ export type Database = {
       analyses: {
         Row: {
           coverage_json: Json | null
+          adapter: string | null
           created_at: string
           error_detail: string | null
+          frontend: string | null
           head_sha: string | null
           id: string
           organization_id: string
@@ -32,9 +34,11 @@ export type Database = {
           status: string
         }
         Insert: {
+          adapter?: string | null
           coverage_json?: Json | null
           created_at?: string
           error_detail?: string | null
+          frontend?: string | null
           head_sha?: string | null
           id?: string
           organization_id: string
@@ -44,9 +48,11 @@ export type Database = {
           status?: string
         }
         Update: {
+          adapter?: string | null
           coverage_json?: Json | null
           created_at?: string
           error_detail?: string | null
+          frontend?: string | null
           head_sha?: string | null
           id?: string
           organization_id?: string
@@ -181,21 +187,27 @@ export type Database = {
       files: {
         Row: {
           analysis_id: string
+          flags: string[]
           id: string
           organization_id: string
           path: string
+          role: string | null
         }
         Insert: {
           analysis_id: string
+          flags?: string[]
           id?: string
           organization_id: string
           path: string
+          role?: string | null
         }
         Update: {
           analysis_id?: string
+          flags?: string[]
           id?: string
           organization_id?: string
           path?: string
+          role?: string | null
         }
         Relationships: [
           {
@@ -290,21 +302,21 @@ export type Database = {
         Row: {
           analysis_id: string
           id: string
-          method: string
+          method: string | null
           organization_id: string
           path: string
         }
         Insert: {
           analysis_id: string
           id?: string
-          method: string
+          method?: string | null
           organization_id: string
           path: string
         }
         Update: {
           analysis_id?: string
           id?: string
-          method?: string
+          method?: string | null
           organization_id?: string
           path?: string
         }

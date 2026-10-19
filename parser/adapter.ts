@@ -1,9 +1,18 @@
-import type { FileReach, ModuleKind } from "./types.ts";
+import type {
+  ExtractedRoute,
+  FileReach,
+  ModuleKind,
+} from "./types.ts";
+import type { FileSymbols } from "./language/types.ts";
 
 /**
  * Framework knowledge is an adapter, not a branch. The parser asks the adapter
  * what a file is; anything that needs to know what a Next.js route looks like
  * belongs in an adapter of its own, and never in the walking or the parsing.
+ *
+ * An adapter is scoped to one language (TypeScript/JavaScript or Python). It
+ * never walks the filesystem and never resolves imports — it only reads the
+ * symbols a language frontend already extracted.
  */
 
 export interface FileDescriptor {
@@ -19,7 +28,15 @@ export interface ModuleInfo {
 
 export interface FrameworkAdapter {
   readonly name: string;
+  /** "typescript" or "python" — which language frontend's symbols this reads. */
+  readonly language: "typescript" | "python";
   describe(file: FileDescriptor): ModuleInfo;
+  /** True when this adapter claims the repository. First match wins. */
+  detect(symbols: ReadonlyMap<string, FileSymbols>): boolean;
+  /** Path → role for the files this adapter recognises. */
+  roles(symbols: ReadonlyMap<string, FileSymbols>): Map<string, string>;
+  /** Routes the adapter could extract, exact or absent. */
+  routes(symbols: ReadonlyMap<string, FileSymbols>): ExtractedRoute[];
 }
 
 const EXTENSION_KINDS: ReadonlyMap<string, ModuleKind> = new Map([
@@ -38,6 +55,7 @@ const EXTENSION_KINDS: ReadonlyMap<string, ModuleKind> = new Map([
   [".json", "json"],
   [".md", "markdown"],
   [".mdx", "markdown"],
+  [".py", "python"],
   [".png", "asset"],
   [".jpg", "asset"],
   [".jpeg", "asset"],
@@ -81,6 +99,14 @@ const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
 /** The package entry, at the root of the tree that was parsed. */
 const ROOT_ENTRY_STEMS: ReadonlySet<string> = new Set(["index"]);
 
+/** Shared kind/reach classification used by every adapter. */
+export function describeModule(file: FileDescriptor): ModuleInfo {
+  return {
+    kind: EXTENSION_KINDS.get(file.extension) ?? "other",
+    reach: reachOf(file),
+  };
+}
+
 function reachOf(file: FileDescriptor): FileReach {
   const segments = file.path.split("/");
   const basename = segments[segments.length - 1];
@@ -101,9 +127,21 @@ function reachOf(file: FileDescriptor): FileReach {
 }
 
 /** The adapter used when nothing else claims the repository. */
-export const fallbackAdapter: FrameworkAdapter = {
-  name: "no-framework",
-  describe(file: FileDescriptor): ModuleInfo {
-    return { kind: EXTENSION_KINDS.get(file.extension) ?? "other", reach: reachOf(file) };
-  },
-};
+export function fallbackAdapter(language: "typescript" | "python"): FrameworkAdapter {
+  return {
+    name: "no-framework",
+    language,
+    describe(file: FileDescriptor): ModuleInfo {
+      return describeModule(file);
+    },
+    detect(): boolean {
+      return false;
+    },
+    roles(): Map<string, string> {
+      return new Map();
+    },
+    routes(): ExtractedRoute[] {
+      return [];
+    },
+  };
+}

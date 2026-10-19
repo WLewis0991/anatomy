@@ -2,13 +2,14 @@
 
 import { useId, useState } from "react";
 
-import type { Edge, ParsedFile } from "@/parser/types";
+import type { Edge, ExtractedRoute, ParsedFile } from "@/parser/types";
 import type { FoldNode } from "@/parser/folding";
 import type { Selection } from "@/lib/graph/types";
 import { countKindsIn, findFolder, summariseRepository } from "@/lib/graph/summary";
 import { blastRadius, dependencyChain, DEFAULT_DEPTH, type WalkResult } from "@/lib/graph/transitive";
 import { computeInsights } from "@/lib/graph/insights";
 import { kindLabel, SWATCH_CLASS } from "@/lib/kinds";
+import { labelForRole } from "@/lib/frameworks";
 
 /**
  * The right-hand column.
@@ -26,6 +27,7 @@ const KIND_MARK: Record<Edge["kind"], string> = {
   static: "import",
   reexport: "re-export",
   dynamic: "dynamic",
+  require: "require",
 };
 
 export type PaneTab = "structure" | "explanation";
@@ -39,6 +41,10 @@ export interface DetailPaneProps {
   repositoryName: string;
   /** The adapter that classified the files. Reported, never re-derived. */
   adapter: string;
+  /** Every route the adapter recovered, in the order it emitted them. */
+  routes: readonly ExtractedRoute[];
+  /** Each file's role, as the adapter reported it. */
+  roleByPath: ReadonlyMap<string, string>;
   tab: PaneTab;
   onTabChange: (tab: PaneTab) => void;
   hoverPath: string | null;
@@ -123,7 +129,7 @@ function ExplanationEmpty({ subject }: { subject: string | null }) {
 }
 
 function RepositorySummary(props: DetailPaneProps) {
-  const { files, edges, repositoryName, adapter } = props;
+  const { files, edges, repositoryName, adapter, routes } = props;
   const pane = hoverProps(props);
   const summary = summariseRepository(files, edges);
 
@@ -136,6 +142,14 @@ function RepositorySummary(props: DetailPaneProps) {
           {summary.fileCount} files &middot; {summary.importCount} imports
         </p>
       </div>
+
+      <Section title="routes" count={routes.length}>
+        {routes.length === 0 ? (
+          <Empty>No routes were recoverable from the syntax.</Empty>
+        ) : (
+          <RouteList routes={routes} />
+        )}
+      </Section>
 
       <Section title="most depended on" count={summary.mostDependedOnTotal}>
         {summary.mostDependedOn.length === 0 ? (
@@ -221,6 +235,7 @@ function InsightsPanel({ files, edges }: { files: readonly ParsedFile[]; edges: 
 
 function FileDetail(props: DetailPaneProps & { file: ParsedFile }) {
   const { file, edges, files } = props;
+  const role = props.roleByPath.get(file.path);
   const pane = hoverProps(props);
   const outgoing = edges.filter((edge) => edge.from === file.path);
   const incoming = edges.filter((edge) => edge.to === file.path);
@@ -238,6 +253,7 @@ function FileDetail(props: DetailPaneProps & { file: ParsedFile }) {
         <h2 className="font-mono text-sm break-all">{file.path}</h2>
         <p className="mt-1 text-xs text-fg-muted">
           {file.lines} lines &middot; {kindLabel(file.kind)}
+          {role !== undefined && ` · ${labelForRole(props.adapter, role)}`}
         </p>
       </div>
 
@@ -440,6 +456,38 @@ function EdgeList({ edges, side, hoverPath, onHover, onSelectPath }: { edges: Ed
         );
       })}
     </ul>
+  );
+}
+
+/**
+ * The routes the adapter recovered, method beside pattern. A framework that
+ * binds no HTTP method to a pattern (Django) renders as ANY rather than
+ * guessing one. Rows are what the syntax said, nothing derived.
+ */
+function RouteList({ routes }: { routes: readonly ExtractedRoute[] }) {
+  return (
+    <table className="w-full border-collapse text-left">
+      <thead>
+        <tr>
+          <th scope="col" className="micro-label w-12 border-b border-line py-1 text-left text-fg-muted">
+            method
+          </th>
+          <th scope="col" className="micro-label border-b border-line py-1 text-left text-fg-muted">
+            path
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {routes.map((route, index) => (
+          <tr key={`${route.method ?? "ANY"}:${route.path}:${index}`} className="border-b border-line last:border-0">
+            <td className="py-1 align-baseline font-mono text-xs tabular-nums text-fg-muted">
+              {route.method ?? "ANY"}
+            </td>
+            <td className="py-1 align-baseline font-mono text-xs break-all text-fg">{route.path}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

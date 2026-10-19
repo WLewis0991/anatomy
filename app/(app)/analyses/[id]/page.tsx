@@ -31,7 +31,7 @@ export default async function AnalysisPage({
 
   const { data: analysis, error: analysisError } = await supabase
     .from("analyses")
-    .select("id, status, stage, stage_message, error_detail, head_sha, coverage_json, project_id, created_at")
+    .select("id, status, stage, stage_message, error_detail, head_sha, coverage_json, adapter, frontend, project_id, created_at")
     .eq("id", id)
     .single();
 
@@ -53,11 +53,11 @@ export default async function AnalysisPage({
   // so paging is required or a large repository renders a silently truncated
   // map. Each page is ordered by id so ranges are stable across requests.
   // Authorization stays with the RLS policy, not a where clause.
-  const files: { id: string; path: string }[] = [];
+  const files: { id: string; path: string; role: string | null; flags: string[] }[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
       .from("files")
-      .select("id, path")
+      .select("id, path, role, flags")
       .eq("analysis_id", id)
       .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
@@ -67,6 +67,25 @@ export default async function AnalysisPage({
     }
 
     files.push(...data);
+    if (data.length < PAGE_SIZE) {
+      break;
+    }
+  }
+
+  const routes: { method: string | null; path: string }[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("routes")
+      .select("method, path")
+      .eq("analysis_id", id)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error || !data) {
+      notFound();
+    }
+
+    routes.push(...data);
     if (data.length < PAGE_SIZE) {
       break;
     }
@@ -103,6 +122,7 @@ export default async function AnalysisPage({
       project={project}
       files={files}
       edges={edges}
+      routes={routes}
     />
   );
 }
