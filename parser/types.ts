@@ -46,7 +46,7 @@ export interface ParsedFile {
   flags: FileFlag[];
 }
 
-export type ImportKind = "static" | "reexport" | "dynamic";
+export type ImportKind = "static" | "reexport" | "dynamic" | "require";
 
 export interface Edge {
   from: string;
@@ -62,7 +62,9 @@ export type UnresolvedReason =
   | "alias-unmapped"
   | "file-not-found"
   | "non-literal-specifier"
-  | "empty-specifier";
+  | "empty-specifier"
+  | "beyond-root"
+  | "namespace-package";
 
 export type Resolution =
   | { outcome: "internal"; to: string }

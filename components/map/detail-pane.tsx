@@ -27,6 +27,7 @@ const KIND_MARK: Record<Edge["kind"], string> = {
   static: "import",
   reexport: "re-export",
   dynamic: "dynamic",
+  require: "require",
 };
 
 export type PaneTab = "structure" | "explanation";

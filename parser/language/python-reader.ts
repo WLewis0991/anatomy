@@ -123,7 +123,7 @@ function readStringLiteral(
  * open or a string is unterminated, with comments stripped. Each logical line
  * carries the 1-based line it started on.
  */
-function logicalLines(source: string): Array<{ text: string; startLine: number }> {
+export function logicalLines(source: string): Array<{ text: string; startLine: number }> {
   const out: Array<{ text: string; startLine: number }> = [];
   const lines = source.split("\n");
   let buffer = "";
@@ -491,6 +491,7 @@ function readFileSymbols(
     return {
       symbols: {
         path: file.path,
+        imports: [],
         directives: [],
         classes: [],
         functions: [],
@@ -570,6 +571,7 @@ function readFileSymbols(
   return {
     symbols: {
       path: file.path,
+      imports: [],
       directives: [],
       classes,
       functions,

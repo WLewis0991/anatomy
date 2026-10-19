@@ -61,6 +61,13 @@ export interface ClassSymbol {
 export interface FileSymbols {
   path: string;
   /**
+   * Every module specifier this file names in an import-like position: a static
+   * `import`, an `import x = require("...")`, a dynamic `import("...")`, or a
+   * `require("...")` call. Adapters that recognise a framework by the package a
+   * file imports (Express, for one) read this; it carries no edge information.
+   */
+  imports: string[];
+  /**
    * Prologue string directives, at file level and inside functions: `"use
    * server"` is the one that matters, and it is a directive rather than a call
    * so it needs its own slot.

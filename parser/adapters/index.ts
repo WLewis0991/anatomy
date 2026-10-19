@@ -6,12 +6,16 @@ import { flaskAdapter } from "./routes.ts";
 import { pageAdapter } from "./page.ts";
 import { nestjsAdapter } from "./nest.ts";
 import { reactAdapter } from "./react.ts";
+import { expressAdapter } from "./express.ts";
 import { fallbackAdapter } from "../adapter.ts";
 
+// Express is appended last: its only sufficient signal is a literal `express`
+// import, so placing it after the existing adapters changes no current detection.
 const TYPESCRIPT_ADAPTERS: readonly FrameworkAdapter[] = [
   pageAdapter,
   nestjsAdapter,
   reactAdapter,
+  expressAdapter,
 ];
 
 const PYTHON_ADAPTERS: readonly FrameworkAdapter[] = [
@@ -40,5 +44,6 @@ export {
   pageAdapter,
   nestjsAdapter,
   reactAdapter,
+  expressAdapter,
   fallbackAdapter,
 };

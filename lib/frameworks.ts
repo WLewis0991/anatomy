@@ -109,6 +109,15 @@ export const FRAMEWORK_CATEGORIES: Record<string, RoleCategory[]> = {
     { key: "context", label: "Contexts", band: "layer" },
     { key: "other", label: "Unclassified", band: "plumbing" },
   ],
+  express: [
+    { key: "route", label: "Routes", band: "surface" },
+    { key: "controller", label: "Controllers", band: "surface" },
+    { key: "service", label: "Services", band: "layer" },
+    { key: "model", label: "Models", band: "layer" },
+    { key: "schema", label: "Schemas", band: "layer" },
+    { key: "middleware", label: "Middleware", band: "plumbing" },
+    { key: "other", label: "Unclassified", band: "plumbing" },
+  ],
   django: [
     { key: "urls", label: "URL configs", band: "surface" },
     { key: "views", label: "Views", band: "surface" },

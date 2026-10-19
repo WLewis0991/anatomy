@@ -3,9 +3,11 @@ import path from "node:path";
 
 import { describeModule, type FrameworkAdapter } from "./adapter.ts";
 import { extractImports } from "./extract-imports.ts";
+import { extractPythonImports } from "./extract-python-imports.ts";
 import { flagsOf } from "./flags.ts";
 import { countDegree, edgesFromRecords, summariseCoverage } from "./graph.ts";
 import { createResolver } from "./resolve.ts";
+import { createPythonResolver } from "./resolve-python.ts";
 import type {
   ExtractedRoute,
   FileReach,
@@ -100,6 +102,21 @@ export async function parseRepository(options: ParseOptions): Promise<ParseResul
     });
   }
 
+  // Python imports, read structurally by the Python reader's own lexer. These
+  // are resolved against Python's rules below and appended after the TS records,
+  // so a TypeScript repository's edge list does not move.
+  const pythonFiles = walk.files.filter((file) => PYTHON_EXTENSIONS.has(file.extension));
+  const { imports: pythonImports, failures: pythonFailures } =
+    extractPythonImports(pythonFiles);
+  for (const failure of pythonFailures) {
+    failedPaths.add(failure.path);
+    skipped.push({
+      path: failure.path,
+      reason: "parse-failed",
+      detail: failure.detail,
+    });
+  }
+
   // Group the walked files by the language frontend that owns their extension,
   // then read each group's symbols. Python's reader is structural and reads no
   // imports; the module graph is the next phase.
@@ -171,11 +188,16 @@ export async function parseRepository(options: ParseOptions): Promise<ParseResul
     };
   });
 
-  const resolver = await createResolver(
-    root,
-    new Set(files.map((file) => file.path)),
-    new Map(skipped.map((file) => [file.path, file])),
-  );
+  const known = new Set(files.map((file) => file.path));
+  const skippedByPath = new Map(skipped.map((file) => [file.path, file]));
+
+  const resolver = await createResolver(root, known, skippedByPath);
+  const pythonResolver = await createPythonResolver({
+    known,
+    skipped: skippedByPath,
+    ignoredDirectories: walkOptions.ignoredDirectories,
+    ignoredDirectorySuffixes: walkOptions.ignoredDirectorySuffixes,
+  });
 
   const records: ImportRecord[] = [];
   for (const found of imports) {
@@ -187,6 +209,15 @@ export async function parseRepository(options: ParseOptions): Promise<ParseResul
       resolution: found.unresolvable
         ? { outcome: "unresolved", ...found.unresolvable }
         : await resolver.resolve(found.from, found.specifier),
+    });
+  }
+  for (const found of pythonImports) {
+    records.push({
+      from: found.from,
+      specifier: found.specifier,
+      kind: found.kind,
+      line: found.line,
+      resolution: await pythonResolver.resolve(found),
     });
   }
 

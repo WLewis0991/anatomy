@@ -151,6 +151,7 @@ function collectPrologueDirectives(
 
 interface WalkContext {
   sourceFile: ts.SourceFile;
+  imports: string[];
   classes: ClassSymbol[];
   functions: FunctionSymbol[];
   decorators: DecoratorSymbol[];
@@ -158,6 +159,20 @@ interface WalkContext {
   currentClass: ClassSymbol | null;
   currentFunction: FunctionSymbol | null;
   directives: string[];
+}
+
+/** The literal specifier of an `import(...)` or `require(...)` call, if literal. */
+function importSpecifierOfCall(call: ts.CallExpression): string | null {
+  const callee = call.expression;
+  const isDynamicImport = callee.kind === ts.SyntaxKind.ImportKeyword;
+  const isRequire = ts.isIdentifier(callee) && callee.text === "require";
+  if (!isDynamicImport && !isRequire) return null;
+  const argument = call.arguments[0];
+  if (argument === undefined) return null;
+  if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) {
+    return argument.text;
+  }
+  return null;
 }
 
 function visitNode(
@@ -175,6 +190,24 @@ function visitNode(
         visitNode(statement, context);
       }
       return;
+
+    case ts.SyntaxKind.ImportDeclaration: {
+      const moduleSpecifier = (node as ts.ImportDeclaration).moduleSpecifier;
+      if (ts.isStringLiteral(moduleSpecifier)) context.imports.push(moduleSpecifier.text);
+      return;
+    }
+
+    case ts.SyntaxKind.ImportEqualsDeclaration: {
+      const reference = (node as ts.ImportEqualsDeclaration).moduleReference;
+      if (
+        ts.isExternalModuleReference(reference) &&
+        reference.expression !== undefined &&
+        ts.isStringLiteral(reference.expression)
+      ) {
+        context.imports.push(reference.expression.text);
+      }
+      return;
+    }
 
     case ts.SyntaxKind.ClassDeclaration:
     case ts.SyntaxKind.ClassExpression: {
@@ -384,6 +417,8 @@ function visitCallExpressionsIn(node: ts.Node, context: WalkContext): void {
         keywords: {},
         line: lineOf(next, context.sourceFile),
       });
+      const specifier = importSpecifierOfCall(next);
+      if (specifier !== null) context.imports.push(specifier);
     }
     // Push children in reverse so they are visited in source order.
     const children = next.getChildren(context.sourceFile);
@@ -412,6 +447,7 @@ function readFileSymbols(
   );
   const context: WalkContext = {
     sourceFile,
+    imports: [],
     classes: [],
     functions: [],
     decorators: [],
@@ -427,6 +463,7 @@ function readFileSymbols(
     return {
       symbols: {
         path: file.path,
+        imports: [],
         directives: [],
         classes: [],
         functions: [],
@@ -445,6 +482,7 @@ function readFileSymbols(
   return {
     symbols: {
       path: file.path,
+      imports: context.imports,
       directives: context.directives,
       classes: context.classes,
       functions: context.functions,
