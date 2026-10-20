@@ -11,9 +11,9 @@ import { ThemeControl } from "@/components/theme-control";
  * The shell's permanent strip across the top: who you are, which organization the
  * rows below belong to, and the three controls that are not about either.
  *
- * Nothing here routes. The one link is the wordmark, and it goes home rather than
- * sideways, so it is not a second route in a nav — a link to `/` beside a link to
- * `/` is a control that appears to do nothing.
+ * Nothing here routes. The one link is the wordmark, and it goes to the workspace
+ * root rather than sideways, so it is not a second route in a nav — a second link
+ * to `/analyses` beside this one is a control that appears to do nothing.
  *
  * All three controls in the right cluster are 30px. `ManageOrganization` and
  * Clerk's trigger were 28px and the step is visible across a 40px bar, so they
@@ -27,7 +27,10 @@ export function AppHeader() {
       {/* The way home from any panel that later gets added to this shell, which is
           why it is a link at all. The mark carries the 40px row by itself now
           that the nav's smaller use of it is gone. */}
-      <Link href="/" className="flex shrink-0 items-center gap-1.5 rounded-md text-fg">
+      <Link
+        href="/analyses"
+        className="flex shrink-0 items-center gap-1.5 rounded-md text-fg"
+      >
         <BracesIcon size={14} />
         <span className="hidden font-mono text-sm font-semibold tracking-tight sm:inline">
           anatomy

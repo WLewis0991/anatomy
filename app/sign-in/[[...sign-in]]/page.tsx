@@ -9,7 +9,7 @@ export default function SignInPage() {
     <div className="flex min-h-screen items-center justify-center">
       {/* Clerk asks for the browser during the server render. */}
       <Suspense>
-        <SignIn />
+        <SignIn fallbackRedirectUrl="/analyses" />
       </Suspense>
     </div>
   );

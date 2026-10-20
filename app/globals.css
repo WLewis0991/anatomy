@@ -45,6 +45,8 @@
   --incoming: #16a34a;
   --outgoing: #d97706;
 
+  --danger: #b3261e;
+
   --kind-typescript: #7c3aed;
   --kind-javascript: #0e7490;
   --kind-style: #be185d;
@@ -76,6 +78,8 @@
   --accent: #3b82f6;
   --incoming: #22c55e;
   --outgoing: #f59e0b;
+
+  --danger: #ff9b9b;
 
   --kind-typescript: #a78bfa;
   --kind-javascript: #22d3ee;
