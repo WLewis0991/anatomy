@@ -13,6 +13,20 @@ what the parser found; it never decides what's there.
 - **How we build it** — [AGENTS.md](AGENTS.md)
 - **Phase specs** — [docs/specs/](docs/specs/)
 
+## Screenshots
+
+**The landing page**
+
+![Anatomy landing page](public/screenshots/anatomy-screenshot-1.png)
+
+**A repository analysis — the dependency map**
+
+![The dependency map for an analysed repository](public/screenshots/anatomy-screenshot-2.png)
+
+**A file's connections and its explanation**
+
+![A selected file's connections to other files, with a generated explanation](public/screenshots/anatomy-screenshot-3.png)
+
 ## Features
 
 - **A real parse, not a model's guess.** `ts-morph` extracts imports,
