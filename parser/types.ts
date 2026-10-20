@@ -6,6 +6,7 @@
 export type ModuleKind =
   | "typescript"
   | "javascript"
+  | "python"
   | "style"
   | "json"
   | "markdown"
@@ -40,6 +41,14 @@ export type FileRole =
   | "docs"
   | "unclassified";
 
+/**
+ * A fact about a file that is true alongside its kind and its role, rather than
+ * instead of them. A `.test.tsx` is a test and a component; the role says what
+ * sort of file it is, a flag says what else is true of it. Facets are a set, so
+ * a file can carry more than one.
+ */
+export type FileFlag = "test";
+
 export interface ParsedFile {
   /** Repository-relative, forward slashes. */
   path: string;
@@ -58,9 +67,11 @@ export interface ParsedFile {
   bytes: number;
   /** Hex digest of the contents, so a rerun can tell whether anything changed. */
   hash: string;
+  /** Orthogonal facts about the file, path-derived and language-agnostic. */
+  flags: FileFlag[];
 }
 
-export type ImportKind = "static" | "reexport" | "dynamic";
+export type ImportKind = "static" | "reexport" | "dynamic" | "require";
 
 export interface Edge {
   from: string;
@@ -76,7 +87,9 @@ export type UnresolvedReason =
   | "alias-unmapped"
   | "file-not-found"
   | "non-literal-specifier"
-  | "empty-specifier";
+  | "empty-specifier"
+  | "beyond-root"
+  | "namespace-package";
 
 export type Resolution =
   | { outcome: "internal"; to: string }
@@ -100,6 +113,12 @@ export type SkipReason =
   | "empty"
   | "parse-failed"
   | "symlink";
+
+/** One extracted route: the pattern, and the method when one is bound. */
+export interface ExtractedRoute {
+  path: string;
+  method: string | null;
+}
 
 export interface SkippedFile {
   path: string;
@@ -168,9 +187,12 @@ export interface ParseResult {
   root: string;
   generatedAt: string;
   adapter: string;
+  frontend: string;
   files: ParsedFile[];
   edges: Edge[];
   fanIn: Record<string, number>;
   fanOut: Record<string, number>;
   coverage: Coverage;
+  /** Every route the recogniser could extract, exact or absent. */
+  routes: ExtractedRoute[];
 }

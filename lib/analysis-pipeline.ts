@@ -43,9 +43,13 @@ export async function runAnalysisPipeline(
   };
 
   try {
-    // A run is the whole description of the repository at one commit, so the
-    // previous answer is cleared before this one starts. Without this a re-run
-    // inserts a second set of files beside the first and the map draws both.
+    // Clear whatever a previous run of this analysis stored, before this one
+    // writes anything. A run is the whole description of the repository at one
+    // commit, so the row must never hold two runs' answers at once: without
+    // this, a re-run would insert a second set of files beside the first and
+    // the map would draw both. Clearing first rather than last also means a run
+    // that fails leaves the analysis empty and failed, rather than holding a
+    // result that no longer describes anything.
     await resetForRun(supabase, analysisId);
 
     // Stage: fetching
@@ -146,11 +150,23 @@ export async function runAnalysisPipeline(
 }
 
 /**
- * Puts an analysis row back to the state a run starts from: no stored result and
- * no verdict left over from the previous one.
+ * Puts an analysis row back to the state a run starts from: no stored result,
+ * and no verdict left over from the previous one.
  *
- * `files` is the parent of edges, explanations and file roles, and those cascade
- * from it. Tables hanging off the analysis itself are deleted explicitly.
+ * `files` is the parent of the edges, explanations and file roles that point at
+ * it, and the schema already declares those cascade, so deleting the files is
+ * what removes them. The tables that hang off the analysis itself — the routes
+ * it recovered, the answers asked of it — have no parent to cascade from and
+ * are deleted here. Every table the parse feeds is therefore emptied, which is
+ * what lets the rest of this be an insert.
+ *
+ * Everything the previous run concluded goes too, including its status. A row
+ * still reading `failed` while a fresh run was working would show that run as
+ * already over, and an adapter or coverage figure left behind would name a
+ * parse that no longer exists.
+ *
+ * This is re-run bookkeeping and nothing else: writing a result is
+ * `storeAnalysisResult`, which only ever inserts.
  */
 async function resetForRun(
   supabase: ReturnType<typeof createSupabaseClient>,
@@ -177,6 +193,7 @@ async function resetForRun(
       coverage_json: null,
       adapter: null,
       head_sha: null,
+      frontend: null,
       // A rerun stores new files before it may claim they carry roles.
       role_schema_version: 0,
       status: "pending",
@@ -210,6 +227,7 @@ async function storeAnalysisResult(
     reach: file.reach,
     role: file.role,
     server_action_count: file.serverActionCount,
+    flags: file.flags,
   }));
 
   const insertedFiles: { id: string; path: string }[] = [];
@@ -250,11 +268,31 @@ async function storeAnalysisResult(
     }
   }
 
-  // Store coverage as JSON
+  // Insert routes in batches, after the files they describe.
+  const routeInserts = result.routes.map((route) => ({
+    analysis_id: analysisId,
+    organization_id: organizationId,
+    method: route.method,
+    path: route.path,
+  }));
+
+  for (const batch of chunk(routeInserts, INSERT_BATCH_SIZE)) {
+    const { error: routesError } = await supabase.from("routes").insert(batch);
+    if (routesError) {
+      throw new Error(`Failed to insert routes: ${routesError.message}`);
+    }
+  }
+
+  // Store coverage, and which language frontend and framework adapter
+  // classified the run, together so the row is never half-described.
   const coverageJson = coverageToJson(result.coverage) as Json;
   const { error: coverageError } = await supabase
     .from("analyses")
-    .update({ coverage_json: coverageJson })
+    .update({
+      coverage_json: coverageJson,
+      adapter: result.adapter,
+      frontend: result.frontend,
+    })
     .eq("id", analysisId);
 
   if (coverageError) {

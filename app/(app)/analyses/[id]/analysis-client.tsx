@@ -2,12 +2,14 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type {
+  Edge,
+  Coverage,
+  ExtractedRoute,
+  FileFlag,
   FileReach,
   FileRole,
   ModuleKind,
   ParsedFile,
-  Edge,
-  Coverage,
 } from "@/parser/types";
 import { foldDirectories } from "@/parser/folding";
 import type { FoldNode, FoldResult } from "@/parser/folding";
@@ -37,6 +39,7 @@ interface AnalysisClientProps {
     head_sha: string | null;
     adapter: string | null;
     coverage_json: Database["public"]["Tables"]["analyses"]["Row"]["coverage_json"];
+    frontend: string | null;
     project_id: string;
     created_at: string;
     /** Which role schema the stored files were written with; 0 means none. */
@@ -54,9 +57,11 @@ interface AnalysisClientProps {
     kind: string | null;
     reach: string | null;
     server_action_count: number | null;
+    flags: string[];
   }>;
   edges: Array<{ id: string; from_file_id: string; to_file_id: string; kind: string; specifier: string }>;
   roles: Array<{ file_id: string; role: string; source: string }>;
+  routes: ExtractedRoute[];
   tracingEnabled: boolean;
 }
 
@@ -75,6 +80,7 @@ export function AnalysisClient({
   files: dbFiles,
   edges: dbEdges,
   roles,
+  routes,
   tracingEnabled,
 }: AnalysisClientProps) {
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -117,6 +123,7 @@ export function AnalysisClient({
       lines: 0,
       bytes: 0,
       hash: "",
+      flags: f.flags.filter((flag): flag is FileFlag => flag === "test"),
     }));
   }, [dbFiles, conventionRoleByPath]);
 
@@ -334,6 +341,7 @@ export function AnalysisClient({
             root={fold.root}
             repositoryName={project.name}
             adapter={analysis.adapter ?? "no-framework"}
+            routes={routes}
             conventionRoleByPath={conventionRoleByPath}
             rolesAvailable={rolesAvailable}
             tab={tab}

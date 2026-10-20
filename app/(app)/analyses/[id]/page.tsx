@@ -32,7 +32,7 @@ export default async function AnalysisPage({
 
   const { data: analysis, error: analysisError } = await supabase
     .from("analyses")
-    .select("id, status, stage, stage_message, error_detail, head_sha, adapter, coverage_json, project_id, created_at, role_schema_version")
+    .select("id, status, stage, stage_message, error_detail, head_sha, adapter, frontend, coverage_json, project_id, created_at, role_schema_version")
     .eq("id", id)
     .single();
 
@@ -61,11 +61,12 @@ export default async function AnalysisPage({
     kind: string | null;
     reach: string | null;
     server_action_count: number | null;
+    flags: string[];
   }> = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
       .from("files")
-      .select("id, path, role, kind, reach, server_action_count")
+      .select("id, path, role, kind, reach, server_action_count, flags")
       .eq("analysis_id", id)
       .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
@@ -94,6 +95,25 @@ export default async function AnalysisPage({
       notFound();
     }
     roles.push(...(data ?? []));
+  }
+
+  const routes: { method: string | null; path: string }[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("routes")
+      .select("method, path")
+      .eq("analysis_id", id)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error || !data) {
+      notFound();
+    }
+
+    routes.push(...data);
+    if (data.length < PAGE_SIZE) {
+      break;
+    }
   }
 
   const edges: {
@@ -128,6 +148,7 @@ export default async function AnalysisPage({
       files={files}
       edges={edges}
       roles={roles}
+      routes={routes}
       tracingEnabled={tracingConfigured()}
     />
   );

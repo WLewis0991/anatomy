@@ -8,7 +8,7 @@ import type { IgnoredDirectory, SkippedFile } from "./types.ts";
  * Which directories are never part of the code being mapped. Each entry says
  * why, so the report can name it rather than quietly losing the files.
  */
-const IGNORED_DIRECTORIES: ReadonlyArray<readonly [string, string]> = [
+export const DEFAULT_IGNORED_DIRECTORIES: ReadonlyMap<string, string> = new Map([
   [".git", "version control metadata"],
   [".hg", "version control metadata"],
   [".svn", "version control metadata"],
@@ -30,7 +30,7 @@ const IGNORED_DIRECTORIES: ReadonlyArray<readonly [string, string]> = [
   ["vendor", "vendored third-party code"],
   ["__pycache__", "python bytecode cache"],
   [".venv", "python virtual environment"],
-];
+]);
 
 /** Code extensions the import extractor parses into a syntax tree. */
 export const PARSEABLE_EXTENSIONS = new Set([
@@ -75,6 +75,24 @@ const BINARY_ASSET_EXTENSIONS = new Set([
   ".ttf",
   ".otf",
 ]);
+
+export interface WalkOptions {
+  /** Extensions that count as source and are handed to a language frontend. */
+  sourceExtensions: ReadonlySet<string>;
+  /** Extensions that are skipped and reported as unsupported. */
+  excludedExtensions: ReadonlySet<string>;
+  /** Directory names that are ignored entirely, mapped to a reason. */
+  ignoredDirectories: ReadonlyMap<string, string>;
+  /** Directory-name suffixes that are ignored entirely, mapped to a reason. */
+  ignoredDirectorySuffixes: ReadonlyMap<string, string>;
+}
+
+export const DEFAULT_WALK_OPTIONS: WalkOptions = {
+  sourceExtensions: PARSEABLE_EXTENSIONS,
+  excludedExtensions: new Set(),
+  ignoredDirectories: DEFAULT_IGNORED_DIRECTORIES,
+  ignoredDirectorySuffixes: new Map(),
+};
 
 export interface DiscoveredFile {
   absolutePath: string;
@@ -121,6 +139,7 @@ function isBinary(buffer: Buffer): boolean {
 async function classifyFile(
   absolutePath: string,
   relativePath: string,
+  options: WalkOptions,
 ): Promise<Classified> {
   const extension = path.extname(absolutePath).toLowerCase();
   const fail = (reason: SkippedFile["reason"], detail: string): Classified => ({
@@ -142,10 +161,19 @@ async function classifyFile(
     return fail("unreadable", error instanceof Error ? error.message : String(error));
   }
 
-  const isCode = PARSEABLE_EXTENSIONS.has(extension);
+  const isCode = options.sourceExtensions.has(extension);
   const isText = TEXT_EXTENSIONS.has(extension);
   const isAsset = BINARY_ASSET_EXTENSIONS.has(extension);
 
+  if (options.excludedExtensions.has(extension)) {
+    return fail(
+      "unsupported-extension",
+      extension.length > 0 ? extension : "no extension",
+    );
+  }
+
+  // Text and assets are part of the repository even though they carry no
+  // imports, so the walk keeps them and the rail can account for them.
   if (!isCode && !isText && !isAsset) {
     return fail(
       "unsupported-extension",
@@ -185,7 +213,10 @@ async function classifyFile(
   };
 }
 
-async function countFiles(directory: string): Promise<number> {
+async function countFiles(
+  directory: string,
+  options: WalkOptions,
+): Promise<number> {
   let total = 0;
   const stack = [directory];
   while (stack.length > 0) {
@@ -198,7 +229,11 @@ async function countFiles(directory: string): Promise<number> {
     }
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        if (IGNORED_DIRECTORIES.some(([name]) => name === entry.name)) continue;
+        if (options.ignoredDirectories.has(entry.name)) continue;
+        const suffixIgnored = [...options.ignoredDirectorySuffixes.keys()].some(
+          (suffix) => entry.name.endsWith(suffix),
+        );
+        if (suffixIgnored) continue;
         stack.push(path.join(current, entry.name));
       } else if (entry.isFile()) {
         total += 1;
@@ -212,6 +247,7 @@ async function walkDirectory(
   root: string,
   directory: string,
   result: WalkResult,
+  options: WalkOptions,
 ): Promise<void> {
   let entries;
   try {
@@ -234,16 +270,28 @@ async function walkDirectory(
     const relativePath = toPosix(path.relative(root, absolutePath));
 
     if (entry.isDirectory()) {
-      const ignored = IGNORED_DIRECTORIES.find(([name]) => name === entry.name);
-      if (ignored) {
+      const reason = options.ignoredDirectories.get(entry.name);
+      if (reason !== undefined) {
         result.ignoredDirectories.push({
           path: relativePath,
-          reason: ignored[1],
-          files: await countFiles(absolutePath),
+          reason,
+          files: await countFiles(absolutePath, options),
         });
         continue;
       }
-      await walkDirectory(root, absolutePath, result);
+      const suffixReason = [...options.ignoredDirectorySuffixes.entries()].find(
+        ([suffix]) => entry.name.endsWith(suffix),
+      );
+      if (suffixReason !== undefined) {
+        const [, reason] = suffixReason;
+        result.ignoredDirectories.push({
+          path: relativePath,
+          reason,
+          files: await countFiles(absolutePath, options),
+        });
+        continue;
+      }
+      await walkDirectory(root, absolutePath, result, options);
       continue;
     }
 
@@ -260,14 +308,17 @@ async function walkDirectory(
 
     if (!entry.isFile()) continue;
 
-    const classified = await classifyFile(absolutePath, relativePath);
+    const classified = await classifyFile(absolutePath, relativePath, options);
     if ("skipped" in classified) result.skipped.push(classified.skipped);
     else result.files.push(classified.parsed);
   }
 }
 
-export async function walkRepository(root: string): Promise<WalkResult> {
+export async function walkRepository(
+  root: string,
+  options: WalkOptions = DEFAULT_WALK_OPTIONS,
+): Promise<WalkResult> {
   const result: WalkResult = { files: [], skipped: [], ignoredDirectories: [] };
-  await walkDirectory(root, root, result);
+  await walkDirectory(root, root, result, options);
   return result;
 }

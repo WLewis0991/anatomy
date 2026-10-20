@@ -1,22 +1,31 @@
 import { Node, SyntaxKind, type SourceFile } from "ts-morph";
 
-import type { FileReach, FileRole, ModuleKind } from "./types.ts";
+import type {
+  ExtractedRoute,
+  FileReach,
+  FileRole,
+  ModuleKind,
+} from "./types.ts";
+import type { FileSymbols } from "./language/types.ts";
 
 /**
  * Framework knowledge is an adapter, not a branch. The parser asks the adapter
  * what a file is; anything that needs to know what a Next.js route looks like
  * belongs in an adapter of its own, and never in the walking or the parsing.
  *
- * An adapter that decides a role from syntax is handed the source text and the
- * syntax tree the import extractor already built, so the file is parsed once.
+ * An adapter is scoped to one language (TypeScript/JavaScript or Python). It
+ * never walks the filesystem and never resolves imports — it only reads the
+ * symbols a language frontend already extracted.
+ *
+ * Role classification is the one decision that also reads syntax directly. It
+ * is handed the tree the import extractor already built, so no file is parsed
+ * a second time to answer it.
  */
 
 export interface FileDescriptor {
   /** Repository-relative, forward slashes. */
   path: string;
   extension: string;
-  /** The source the walk already read. */
-  source: string;
   /** The tree the import extractor built, absent for non-code files. */
   sourceFile?: SourceFile;
 }
@@ -24,13 +33,19 @@ export interface FileDescriptor {
 export interface ModuleInfo {
   kind: ModuleKind;
   reach: FileReach;
-  role: FileRole;
-  serverActionCount: number | null;
 }
 
 export interface FrameworkAdapter {
   readonly name: string;
+  /** "typescript" or "python" — which language frontend's symbols this reads. */
+  readonly language: "typescript" | "python";
   describe(file: FileDescriptor): ModuleInfo;
+  /** True when this adapter claims the repository. First match wins. */
+  detect(symbols: ReadonlyMap<string, FileSymbols>): boolean;
+  /** Path → role for the files this adapter recognises. */
+  roles(symbols: ReadonlyMap<string, FileSymbols>): Map<string, string>;
+  /** Routes the adapter could extract, exact or absent. */
+  routes(symbols: ReadonlyMap<string, FileSymbols>): ExtractedRoute[];
 }
 
 const EXTENSION_KINDS: ReadonlyMap<string, ModuleKind> = new Map([
@@ -49,6 +64,7 @@ const EXTENSION_KINDS: ReadonlyMap<string, ModuleKind> = new Map([
   [".json", "json"],
   [".md", "markdown"],
   [".mdx", "markdown"],
+  [".py", "python"],
   [".png", "asset"],
   [".jpg", "asset"],
   [".jpeg", "asset"],
@@ -65,12 +81,6 @@ const EXTENSION_KINDS: ReadonlyMap<string, ModuleKind> = new Map([
   [".otf", "asset"],
 ]);
 
-/**
- * Files the framework loads by name rather than by an import. These are
- * recognised from the path alone, because the path is all the descriptor
- * carries. That is a deliberate limit: a bin entry point named in a
- * package.json looks like an ordinary file here, so it is still reported.
- */
 const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ts",
   ".tsx",
@@ -159,6 +169,34 @@ function reachOf(file: FileDescriptor): FileReach {
   return "none";
 }
 
+/** Shared kind/reach classification used by every adapter. */
+export function describeModule(file: FileDescriptor): ModuleInfo {
+  return {
+    kind: EXTENSION_KINDS.get(file.extension) ?? "other",
+    reach: reachOf(file),
+  };
+}
+
+/** The adapter used when nothing else claims the repository. */
+export function fallbackAdapter(language: "typescript" | "python"): FrameworkAdapter {
+  return {
+    name: "no-framework",
+    language,
+    describe(file: FileDescriptor): ModuleInfo {
+      return describeModule(file);
+    },
+    detect(): boolean {
+      return false;
+    },
+    roles(): Map<string, string> {
+      return new Map();
+    },
+    routes(): ExtractedRoute[] {
+      return [];
+    },
+  };
+}
+
 function isConfigBasename(basename: string): boolean {
   const lower = basename.toLowerCase();
   return (
@@ -207,26 +245,6 @@ function roleFromSyntax(file: FileDescriptor): FileRole | null {
   if (hasExportedHook(functions)) return "hook";
   return null;
 }
-
-/** The adapter used when nothing else claims the repository. */
-export const fallbackAdapter: FrameworkAdapter = {
-  name: "no-framework",
-  describe(file: FileDescriptor): ModuleInfo {
-    let role = roleFromName(file);
-    try {
-      role = roleFromSyntax(file) ?? role;
-    } catch {
-      // A syntax decision that failed is no role at all; the name-only role
-      // stands. The parse continues either way.
-    }
-    return {
-      kind: EXTENSION_KINDS.get(file.extension) ?? "other",
-      reach: reachOf(file),
-      role,
-      serverActionCount: null,
-    };
-  },
-};
 
 function segmentsOf(filePath: string): string[] {
   return filePath.split("/");
@@ -435,7 +453,7 @@ function nextReachOf(file: FileDescriptor, role: FileRole): FileReach {
       return "framework";
     case "config":
       // Only a root next.config is framework-loaded. A nested config is not.
-      return segmentsOf(file.path).length === 1 &&
+      return segments.length === 1 &&
         basenameOf(file.path).startsWith("next.config")
         ? "framework"
         : "none";
@@ -444,53 +462,39 @@ function nextReachOf(file: FileDescriptor, role: FileRole): FileReach {
   }
 }
 
+export interface RoleClassification {
+  role: FileRole;
+  serverActionCount: number | null;
+  reach: FileReach;
+}
+
 /**
- * Next's conventions. A role is only claimed here when the path or the syntax
- * proves it; a failed decision falls back to the name-only role rather than
+ * What this file is. Next's conventions are claimed only when the Next adapter
+ * found the repository; otherwise the syntax and the name are all the evidence
+ * there is. A failed decision falls back to the name-only role rather than
  * failing the parse.
  */
-export const nextAdapter: FrameworkAdapter = {
-  name: "next",
-  describe(file: FileDescriptor): ModuleInfo {
-    const kind = EXTENSION_KINDS.get(file.extension) ?? "other";
-    let decision: RoleDecision;
+export function classifyFile(file: FileDescriptor, next: boolean): RoleClassification {
+  if (!next) {
+    let role = roleFromName(file);
     try {
-      decision = nextRoleOf(file);
+      role = roleFromSyntax(file) ?? role;
     } catch {
-      decision = { role: roleFromName(file), serverActionCount: null };
+      // A syntax decision that failed is no role at all; the name-only role
+      // stands. The parse continues either way.
     }
-    return {
-      kind,
-      reach: nextReachOf(file, decision.role),
-      role: decision.role,
-      serverActionCount: decision.serverActionCount,
-    };
-  },
-};
+    return { role, serverActionCount: null, reach: reachOf(file) };
+  }
 
-/** Whether the walked paths carry a root `next.config.*`. */
-function hasRootNextConfig(files: readonly { relativePath: string }[]): boolean {
-  return files.some(
-    (file) =>
-      !file.relativePath.includes("/") &&
-      basenameOf(file.relativePath).startsWith("next.config"),
-  );
-}
-
-/** Whether an `app/` or `src/app/` prefix appears anywhere in the walked paths. */
-function hasAppTree(files: readonly { relativePath: string }[]): boolean {
-  return files.some(
-    (file) =>
-      file.relativePath.startsWith("app/") || file.relativePath.startsWith("src/app/"),
-  );
-}
-
-/**
- * Which adapter claims the repository. A Next config or an app tree is enough;
- * nothing else claims it, so the fallback roles apply.
- */
-export function selectAdapter(
-  files: readonly { relativePath: string }[],
-): FrameworkAdapter {
-  return hasRootNextConfig(files) || hasAppTree(files) ? nextAdapter : fallbackAdapter;
+  let decision: RoleDecision;
+  try {
+    decision = nextRoleOf(file);
+  } catch {
+    decision = { role: roleFromName(file), serverActionCount: null };
+  }
+  return {
+    role: decision.role,
+    serverActionCount: decision.serverActionCount,
+    reach: nextReachOf(file, decision.role),
+  };
 }
