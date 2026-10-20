@@ -29,6 +29,7 @@ export type Database = {
           id: string
           organization_id: string
           project_id: string
+          role_schema_version: number
           stage: string
           stage_message: string | null
           status: string
@@ -43,6 +44,7 @@ export type Database = {
           id?: string
           organization_id: string
           project_id: string
+          role_schema_version?: number
           stage?: string
           stage_message?: string | null
           status?: string
@@ -57,6 +59,7 @@ export type Database = {
           id?: string
           organization_id?: string
           project_id?: string
+          role_schema_version?: number
           stage?: string
           stage_message?: string | null
           status?: string
@@ -208,27 +211,36 @@ export type Database = {
           flags: string[]
           hash: string | null
           id: string
+          kind: string | null
           organization_id: string
           path: string
+          reach: string | null
           role: string | null
+          server_action_count: number | null
         }
         Insert: {
           analysis_id: string
           flags?: string[]
           hash?: string | null
           id?: string
+          kind?: string | null
           organization_id: string
           path: string
+          reach?: string | null
           role?: string | null
+          server_action_count?: number | null
         }
         Update: {
           analysis_id?: string
           flags?: string[]
           hash?: string | null
           id?: string
+          kind?: string | null
           organization_id?: string
           path?: string
+          reach?: string | null
           role?: string | null
+          server_action_count?: number | null
         }
         Relationships: [
           {

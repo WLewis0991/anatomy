@@ -11,7 +11,7 @@ import {
 } from "reactflow";
 import "reactflow/dist/style.css";
 
-import type { Edge, ModuleKind, ParsedFile } from "@/parser/types";
+import type { Edge, ParsedFile } from "@/parser/types";
 import { folderHoldingFile, type FoldResult } from "@/parser/folding";
 import { anchorForFile, deriveCanvas, folderNodeId, rowId, rowLabel, ROWS_PER_STEP } from "@/lib/graph/derive";
 import { layoutCanvas, type PositionedNode } from "@/lib/graph/layout";
@@ -26,8 +26,8 @@ export interface DependencyMapProps {
   fileFanIn: Readonly<Record<string, number>>;
   fileFanOut: Readonly<Record<string, number>>;
   fold: FoldResult;
-  /** The category the rail is highlighting, or null when all are. */
-  activeKind: ModuleKind | null;
+  /** The files the rail's active filter names, or null when nothing is filtered. */
+  activeMatchPaths: ReadonlySet<string> | null;
   /**
    * The one selection. It lives above the map because the pane both reads it and
    * moves it, and two copies of it cannot both be right.
@@ -97,7 +97,7 @@ function DependencyMapCanvas({
   fileFanIn,
   fileFanOut,
   fold,
-  activeKind,
+  activeMatchPaths,
   selection,
   hoverPath,
   onSelect,
@@ -122,21 +122,13 @@ function DependencyMapCanvas({
     pendingFocus.current = id;
   }, []);
 
-  // The rail's category, as the set of files it names. The graph depends only on the
-  // fold, what is open and what matches: selecting a file and choosing a category
-  // both change what is drawn, never where anything sits, so the layout cannot shift
-  // under a click.
-  const matchPaths = useMemo(
-    () =>
-      activeKind === null
-        ? null
-        : new Set(files.filter((file) => file.kind === activeKind).map((file) => file.path)),
-    [activeKind, files],
-  );
-
+  // The rail's category, as the exact set of files it names. The graph depends only
+  // on the fold, what is open and what matches: selecting a file and choosing a
+  // category both change what is drawn, never where anything sits, so the layout
+  // cannot shift under a click.
   const graph = useMemo(
-    () => deriveCanvas({ root: fold.root, openFolders, listedRows, edges, fileFanIn, fileFanOut, matchPaths }),
-    [fold.root, openFolders, listedRows, edges, fileFanIn, fileFanOut, matchPaths],
+    () => deriveCanvas({ root: fold.root, openFolders, listedRows, edges, fileFanIn, fileFanOut, matchPaths: activeMatchPaths }),
+    [fold.root, openFolders, listedRows, edges, fileFanIn, fileFanOut, activeMatchPaths],
   );
 
   const layout = useMemo(() => layoutCanvas(graph), [graph]);
@@ -372,7 +364,7 @@ function DependencyMapCanvas({
       layout.nodes.map((node) => {
         const hovered = hoverAnchorId !== null && node.id === hoverAnchorId;
         const dimmedBySelection = selectedId !== null && !emphasis.nodeIds.has(node.id);
-        const dimmedByCategory = matchPaths !== null && !node.containsMatch;
+        const dimmedByCategory = activeMatchPaths !== null && !node.containsMatch;
         const data: CanvasNodeViewData = {
           node,
           selected: selectedId === node.id,
@@ -397,7 +389,7 @@ function DependencyMapCanvas({
           data,
         };
       }),
-    [layout.nodes, selectedId, emphasis, hoverAnchorId, matchPaths],
+    [layout.nodes, selectedId, emphasis, hoverAnchorId, activeMatchPaths],
   );
 
   const flowEdges = useMemo<FlowEdge[]>(

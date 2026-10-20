@@ -32,6 +32,7 @@ const IGNORED_DIRECTORIES: ReadonlyArray<readonly [string, string]> = [
   [".venv", "python virtual environment"],
 ];
 
+/** Code extensions the import extractor parses into a syntax tree. */
 export const PARSEABLE_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
@@ -41,6 +42,38 @@ export const PARSEABLE_EXTENSIONS = new Set([
   ".jsx",
   ".mjs",
   ".cjs",
+]);
+
+/**
+ * Text that is part of the repository and has a role, but carries no imports.
+ * Read as UTF-8 so it can be counted and named; a NUL byte still means binary.
+ */
+const TEXT_EXTENSIONS = new Set([
+  ".css",
+  ".scss",
+  ".sass",
+  ".less",
+  ".md",
+  ".mdx",
+  ".json",
+  ".svg",
+]);
+
+/** Bytes that are a file in the map without ever being source. */
+const BINARY_ASSET_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".ico",
+  ".bmp",
+  ".tiff",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
 ]);
 
 export interface DiscoveredFile {
@@ -109,15 +142,35 @@ async function classifyFile(
     return fail("unreadable", error instanceof Error ? error.message : String(error));
   }
 
-  if (isBinary(buffer)) {
-    return fail("binary", `${buffer.length} bytes containing NUL`);
-  }
+  const isCode = PARSEABLE_EXTENSIONS.has(extension);
+  const isText = TEXT_EXTENSIONS.has(extension);
+  const isAsset = BINARY_ASSET_EXTENSIONS.has(extension);
 
-  if (!PARSEABLE_EXTENSIONS.has(extension)) {
+  if (!isCode && !isText && !isAsset) {
     return fail(
       "unsupported-extension",
       extension.length > 0 ? extension : "no extension",
     );
+  }
+
+  const hash = createHash("sha256").update(buffer).digest("hex").slice(0, 16);
+  const base = {
+    absolutePath,
+    relativePath,
+    extension,
+    folder: folderOf(relativePath),
+    bytes: buffer.length,
+    hash,
+  };
+
+  // An asset is part of the repository without being source. Its bytes are
+  // enough to identify it on a rerun; there is no text to count or read.
+  if (isAsset) {
+    return { parsed: { ...base, contents: "", lines: 0 } };
+  }
+
+  if (isBinary(buffer)) {
+    return fail("binary", `${buffer.length} bytes containing NUL`);
   }
 
   const contents = buffer.toString("utf8");
@@ -125,14 +178,9 @@ async function classifyFile(
 
   return {
     parsed: {
-      absolutePath,
-      relativePath,
-      extension,
-      folder: folderOf(relativePath),
+      ...base,
       contents,
       lines: countLines(contents),
-      bytes: buffer.length,
-      hash: createHash("sha256").update(buffer).digest("hex").slice(0, 16),
     },
   };
 }

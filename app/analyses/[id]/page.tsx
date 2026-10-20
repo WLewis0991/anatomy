@@ -32,7 +32,7 @@ export default async function AnalysisPage({
 
   const { data: analysis, error: analysisError } = await supabase
     .from("analyses")
-    .select("id, status, stage, stage_message, error_detail, head_sha, adapter, coverage_json, project_id, created_at")
+    .select("id, status, stage, stage_message, error_detail, head_sha, adapter, coverage_json, project_id, created_at, role_schema_version")
     .eq("id", id)
     .single();
 
@@ -54,11 +54,18 @@ export default async function AnalysisPage({
   // so paging is required or a large repository renders a silently truncated
   // map. Each page is ordered by id so ranges are stable across requests.
   // Authorization stays with the RLS policy, not a where clause.
-  const files: { id: string; path: string }[] = [];
+  const files: Array<{
+    id: string;
+    path: string;
+    role: string | null;
+    kind: string | null;
+    reach: string | null;
+    server_action_count: number | null;
+  }> = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
       .from("files")
-      .select("id, path")
+      .select("id, path, role, kind, reach, server_action_count")
       .eq("analysis_id", id)
       .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);

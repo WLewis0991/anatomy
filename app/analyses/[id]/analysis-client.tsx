@@ -1,10 +1,19 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { ModuleKind, ParsedFile, Edge, Coverage } from "@/parser/types";
+import type {
+  FileReach,
+  FileRole,
+  ModuleKind,
+  ParsedFile,
+  Edge,
+  Coverage,
+} from "@/parser/types";
 import { foldDirectories } from "@/parser/folding";
 import type { FoldNode, FoldResult } from "@/parser/folding";
 import type { Selection } from "@/lib/graph/types";
+import { kindFromPath } from "@/lib/kinds";
+import type { MapFilter } from "@/lib/roles";
 
 import { MapShell } from "@/components/map/map-shell";
 import { DependencyMap, type DependencyMapHandle } from "@/components/map/dependency-map";
@@ -30,13 +39,22 @@ interface AnalysisClientProps {
     coverage_json: Database["public"]["Tables"]["analyses"]["Row"]["coverage_json"];
     project_id: string;
     created_at: string;
+    /** Which role schema the stored files were written with; 0 means none. */
+    role_schema_version: number;
   };
   project: {
     id: string;
     name: string;
     url: string;
   };
-  files: Array<{ id: string; path: string }>;
+  files: Array<{
+    id: string;
+    path: string;
+    role: string | null;
+    kind: string | null;
+    reach: string | null;
+    server_action_count: number | null;
+  }>;
   edges: Array<{ id: string; from_file_id: string; to_file_id: string; kind: string; specifier: string }>;
   roles: Array<{ file_id: string; role: string; source: string }>;
   tracingEnabled: boolean;
@@ -47,6 +65,9 @@ interface ExplanationSlot {
   stale: boolean;
   error: string | null;
 }
+
+/** A filter value present in the schema but with no files in this analysis. */
+const EMPTY_PATHS: ReadonlySet<string> = new Set();
 
 export function AnalysisClient({
   analysis,
@@ -59,7 +80,7 @@ export function AnalysisClient({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [tab, setTab] = useState<PaneTab>("structure");
   const [hoverPath, setHoverPath] = useState<string | null>(null);
-  const [activeKind, setActiveKind] = useState<ModuleKind | null>(null);
+  const [filter, setFilter] = useState<MapFilter | null>(null);
   // The explanation cache the user can feel. Keyed by subject, not by tab: this
   // is what makes moving away and back instant without a second request.
   const [explanations, setExplanations] = useState<Record<string, ExplanationSlot>>({});
@@ -67,19 +88,66 @@ export function AnalysisClient({
   const [reanalysisNote, setReanalysisNote] = useState<string | null>(null);
   const map = useRef<DependencyMapHandle | null>(null);
 
-  // Convert database rows to parser types
+  // Whether this run stored a role for every file. An analysis written before
+  // phase 11 has none, and a missing role is not the same as `unclassified`.
+  const rolesAvailable = analysis.role_schema_version >= 1;
+
+  // The convention role per path, straight from the rows. Kept separate from the
+  // AI's `rolesByPath` and from the parsed files so a fallback can never leak into
+  // a role filter: a file stored with no role is null here, and null is excluded
+  // from every role set.
+  const conventionRoleByPath = useMemo((): ReadonlyMap<string, FileRole | null> => {
+    const byPath = new Map<string, FileRole | null>();
+    for (const file of dbFiles) byPath.set(file.path, toFileRole(file.role));
+    return byPath;
+  }, [dbFiles]);
+
+  // Convert database rows to parser types. A row stored before phase 11 carries
+  // no role, kind or reach; the kind falls back to a display-only value from the
+  // path. The coerced role below is never read by the rail or the pane.
   const parsedFiles = useMemo((): ParsedFile[] => {
     return dbFiles.map((f) => ({
       path: f.path,
       folder: f.path.includes("/") ? f.path.substring(0, f.path.lastIndexOf("/")) : ".",
       extension: f.path.includes(".") ? f.path.substring(f.path.lastIndexOf(".")) : "",
-      kind: inferKindFromPath(f.path),
-      reach: "none" as const,
+      kind: toModuleKind(f.kind, f.path),
+      reach: toFileReach(f.reach),
+      role: conventionRoleByPath.get(f.path) ?? "unclassified",
+      serverActionCount: f.server_action_count,
       lines: 0,
       bytes: 0,
       hash: "",
     }));
-  }, [dbFiles]);
+  }, [dbFiles, conventionRoleByPath]);
+
+  // The one set every role count, dim and panel match reads. Null roles are never
+  // coerced into `unclassified`.
+  const rolePaths = useMemo((): ReadonlyMap<FileRole, ReadonlySet<string>> => {
+    const byRole = new Map<FileRole, Set<string>>();
+    for (const [path, role] of conventionRoleByPath) {
+      if (role === null) continue;
+      const paths = byRole.get(role) ?? new Set<string>();
+      paths.add(path);
+      byRole.set(role, paths);
+    }
+    return byRole;
+  }, [conventionRoleByPath]);
+
+  const kindPaths = useMemo((): ReadonlyMap<ModuleKind, ReadonlySet<string>> => {
+    const byKind = new Map<ModuleKind, Set<string>>();
+    for (const file of parsedFiles) {
+      const paths = byKind.get(file.kind) ?? new Set<string>();
+      paths.add(file.path);
+      byKind.set(file.kind, paths);
+    }
+    return byKind;
+  }, [parsedFiles]);
+
+  const activeMatchPaths = useMemo((): ReadonlySet<string> | null => {
+    if (filter === null) return null;
+    if (filter.facet === "role") return rolePaths.get(filter.value as FileRole) ?? EMPTY_PATHS;
+    return kindPaths.get(filter.value as ModuleKind) ?? EMPTY_PATHS;
+  }, [filter, rolePaths, kindPaths]);
 
   // We need a different approach - let's fetch file paths for edges
   // For now, let's create a map of file_id to path
@@ -249,8 +317,15 @@ export function AnalysisClient({
       <MapShell
         files={parsedFiles}
         repositoryName={project.name}
-        activeKind={activeKind}
-        onSelectKind={setActiveKind}
+        filter={filter}
+        onFilterChange={setFilter}
+        activeMatchPaths={activeMatchPaths}
+        rolePaths={rolePaths}
+        kindPaths={kindPaths}
+        rolesAvailable={rolesAvailable}
+        adapter={analysis.adapter ?? "no-framework"}
+        onRerun={rerunAnalysis}
+        reanalysisNote={reanalysisNote}
         detail={
           <DetailPane
             selection={selection}
@@ -259,6 +334,8 @@ export function AnalysisClient({
             root={fold.root}
             repositoryName={project.name}
             adapter={analysis.adapter ?? "no-framework"}
+            conventionRoleByPath={conventionRoleByPath}
+            rolesAvailable={rolesAvailable}
             tab={tab}
             onTabChange={setTab}
             hoverPath={hoverPath}
@@ -284,7 +361,7 @@ export function AnalysisClient({
           fileFanIn={fanIn}
           fileFanOut={fanOut}
           fold={fold}
-          activeKind={activeKind}
+          activeMatchPaths={activeMatchPaths}
           selection={selection}
           hoverPath={hoverPath}
           onSelect={handleSelect}
@@ -295,40 +372,57 @@ export function AnalysisClient({
   );
 }
 
-function inferKindFromPath(path: string): ModuleKind {
-  const ext = path.includes(".") ? path.substring(path.lastIndexOf(".")).toLowerCase() : "";
-  switch (ext) {
-    case ".ts":
-    case ".tsx":
-    case ".mts":
-    case ".cts":
-      return "typescript";
-    case ".js":
-    case ".jsx":
-    case ".mjs":
-    case ".cjs":
-      return "javascript";
-    case ".css":
-    case ".scss":
-    case ".sass":
-    case ".less":
-      return "style";
-    case ".json":
-      return "json";
-    case ".md":
-    case ".mdx":
-      return "markdown";
-    case ".png":
-    case ".jpg":
-    case ".jpeg":
-    case ".svg":
-    case ".gif":
-    case ".webp":
-    case ".ico":
-      return "asset";
-    default:
-      return "other";
-  }
+const MODULE_KINDS: ReadonlySet<string> = new Set([
+  "typescript",
+  "javascript",
+  "style",
+  "json",
+  "markdown",
+  "config",
+  "asset",
+  "other",
+]);
+
+const FILE_REACHES: ReadonlySet<string> = new Set(["none", "framework", "entrypoint"]);
+
+const FILE_ROLES: ReadonlySet<string> = new Set([
+  "page",
+  "layout",
+  "route-handler",
+  "middleware",
+  "action-module",
+  "component",
+  "hook",
+  "config",
+  "style",
+  "asset",
+  "docs",
+  "unclassified",
+]);
+
+function isModuleKind(value: string): value is ModuleKind {
+  return MODULE_KINDS.has(value);
+}
+
+function isFileReach(value: string): value is FileReach {
+  return FILE_REACHES.has(value);
+}
+
+function isFileRole(value: string): value is FileRole {
+  return FILE_ROLES.has(value);
+}
+
+function toModuleKind(value: string | null, path: string): ModuleKind {
+  return value !== null && isModuleKind(value) ? value : kindFromPath(path);
+}
+
+function toFileReach(value: string | null): FileReach {
+  return value !== null && isFileReach(value) ? value : "none";
+}
+
+/** Null for a row stored before roles existed; that is not `unclassified`. */
+function toFileRole(value: string | null): FileRole | null {
+  return value !== null && isFileRole(value) ? value : null;
 }
 
 /**

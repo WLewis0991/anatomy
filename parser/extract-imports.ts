@@ -1,7 +1,7 @@
 import { Node, Project, SyntaxKind, type SourceFile } from "ts-morph";
 
 import type { ImportKind } from "./types.ts";
-import type { DiscoveredFile } from "./walk.ts";
+import { PARSEABLE_EXTENSIONS, type DiscoveredFile } from "./walk.ts";
 
 /**
  * Reading imports out of a file with a real TypeScript parser. Three things
@@ -25,6 +25,8 @@ export interface ExtractedImport {
 export interface ExtractResult {
   imports: ExtractedImport[];
   failures: Array<{ path: string; detail: string }>;
+  /** The tree built for each file that parsed, so the adapter reuses it. */
+  sourceFiles: Map<string, SourceFile>;
 }
 
 /** Nothing is type-checked or emitted; these only decide what will parse. */
@@ -40,8 +42,13 @@ export function extractImports(files: readonly DiscoveredFile[]): ExtractResult 
 
   const imports: ExtractedImport[] = [];
   const failures: ExtractResult["failures"] = [];
+  const sourceFiles = new Map<string, SourceFile>();
 
   for (const file of files) {
+    // Only code becomes a syntax tree. A stylesheet, a document, a JSON file or
+    // an image is still a file in the map, but it has no imports to read.
+    if (!PARSEABLE_EXTENSIONS.has(file.extension)) continue;
+
     let sourceFile: SourceFile;
     try {
       sourceFile = project.createSourceFile(file.relativePath, file.contents);
@@ -52,6 +59,7 @@ export function extractImports(files: readonly DiscoveredFile[]): ExtractResult 
       });
       continue;
     }
+    sourceFiles.set(file.relativePath, sourceFile);
 
     for (const declaration of sourceFile.getImportDeclarations()) {
       imports.push({
@@ -96,7 +104,7 @@ export function extractImports(files: readonly DiscoveredFile[]): ExtractResult 
     }
   }
 
-  return { imports, failures };
+  return { imports, failures, sourceFiles };
 }
 
 function lineOf(sourceFile: SourceFile, node: Node): number {

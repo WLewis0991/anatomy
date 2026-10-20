@@ -17,6 +17,34 @@ function requireArray(value: unknown, field: string): unknown[] {
   return value;
 }
 
+const MODULE_KINDS = new Set<string>([
+  "typescript",
+  "javascript",
+  "style",
+  "json",
+  "markdown",
+  "config",
+  "asset",
+  "other",
+]);
+
+const FILE_REACHES = new Set<string>(["none", "framework", "entrypoint"]);
+
+const FILE_ROLES = new Set<string>([
+  "page",
+  "layout",
+  "route-handler",
+  "middleware",
+  "action-module",
+  "component",
+  "hook",
+  "config",
+  "style",
+  "asset",
+  "docs",
+  "unclassified",
+]);
+
 export function assertParseResult(value: unknown): ParseResult {
   if (typeof value !== "object" || value === null) fail("not an object");
   const candidate = value as Partial<ParseResult>;
@@ -37,6 +65,24 @@ export function assertParseResult(value: unknown): ParseResult {
   for (const file of files) {
     if (typeof file.path !== "string") fail("a file has no path");
     if (typeof file.folder !== "string") fail(`${file.path} has no folder`);
+    if (typeof file.kind !== "string" || !MODULE_KINDS.has(file.kind)) {
+      fail(`${file.path} has no kind`);
+    }
+    if (typeof file.reach !== "string" || !FILE_REACHES.has(file.reach)) {
+      fail(`${file.path} has no reach`);
+    }
+    if (typeof file.role !== "string" || !FILE_ROLES.has(file.role)) {
+      fail(`${file.path} has no role`);
+    }
+    const serverActionCount = file.serverActionCount;
+    if (
+      serverActionCount !== null &&
+      (typeof serverActionCount !== "number" ||
+        !Number.isInteger(serverActionCount) ||
+        serverActionCount < 0)
+    ) {
+      fail(`${file.path} has an invalid serverActionCount`);
+    }
     known.add(file.path);
   }
 

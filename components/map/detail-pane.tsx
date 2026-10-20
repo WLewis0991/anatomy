@@ -2,13 +2,14 @@
 
 import { useId, useState } from "react";
 
-import type { Edge, ParsedFile } from "@/parser/types";
+import type { Edge, FileRole, ParsedFile } from "@/parser/types";
 import type { FoldNode } from "@/parser/folding";
 import type { Selection } from "@/lib/graph/types";
 import { countKindsIn, findFolder, summariseRepository } from "@/lib/graph/summary";
 import { blastRadius, dependencyChain, DEFAULT_DEPTH, type WalkResult } from "@/lib/graph/transitive";
 import { computeInsights } from "@/lib/graph/insights";
 import { kindLabel, SWATCH_CLASS } from "@/lib/kinds";
+import { roleLabel } from "@/lib/roles";
 import type { ExplanationSubjectKind, ExplanationView, FileRoleView } from "@/lib/ai/types";
 import { ExplanationText } from "./explanation-text";
 
@@ -46,6 +47,10 @@ export interface DetailPaneProps {
   hoverPath: string | null;
   onHover: (filePath: string | null) => void;
   onSelectPath: (filePath: string) => void;
+  /** The convention role stored with this analysis, null for a pre-phase-11 row. */
+  conventionRoleByPath: ReadonlyMap<string, FileRole | null>;
+  /** False when the analysis predates the role schema; roles are then unavailable. */
+  rolesAvailable: boolean;
   rolesByPath: ReadonlyMap<string, FileRoleView>;
   /** Explanation cache and request state for the current subject, held above the pane. */
   explanation: ExplanationView | null;
@@ -233,6 +238,22 @@ function RepositorySummary(props: DetailPaneProps) {
         </p>
       </div>
 
+      {!props.rolesAvailable && (
+        <div className="space-y-1 border border-line bg-surface-2 p-2">
+          <p className="text-xs text-fg">Roles are unavailable for this analysis.</p>
+          <button
+            type="button"
+            onClick={props.onRerun}
+            className="rounded-[3px] border border-line bg-surface px-2 py-1 text-xs hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            Re-analyse repository
+          </button>
+          {props.reanalysisNote !== null && (
+            <p className="text-xs text-fg-muted">{props.reanalysisNote}</p>
+          )}
+        </div>
+      )}
+
       <Section title="most depended on" count={summary.mostDependedOnTotal}>
         {summary.mostDependedOn.length === 0 ? (
           <Empty>Nothing inside the repository imports anything inside it.</Empty>
@@ -315,6 +336,24 @@ function InsightsPanel({ files, edges }: { files: readonly ParsedFile[]; edges: 
   );
 }
 
+const LAYOUT_CONVENTIONS: ReadonlySet<string> = new Set([
+  "layout",
+  "template",
+  "default",
+  "loading",
+  "error",
+  "global-error",
+  "not-found",
+]);
+
+/** The route-segment convention a layout-role file uses, for the pane to name. */
+function layoutConventionOf(filePath: string): string | null {
+  const basename = filePath.split("/").pop() ?? filePath;
+  const dot = basename.lastIndexOf(".");
+  const stem = dot === -1 ? basename : basename.slice(0, dot);
+  return LAYOUT_CONVENTIONS.has(stem) ? stem : null;
+}
+
 function FileDetail(props: DetailPaneProps & { file: ParsedFile }) {
   const { file, edges, files } = props;
   const pane = hoverProps(props);
@@ -335,9 +374,50 @@ function FileDetail(props: DetailPaneProps & { file: ParsedFile }) {
         <p className="mt-1 text-xs text-fg-muted">
           {file.lines} lines &middot; {kindLabel(file.kind)}
         </p>
+        {props.rolesAvailable ? (
+          (() => {
+            const conventionRole = props.conventionRoleByPath.get(file.path) ?? null;
+            if (conventionRole === null) {
+              return (
+                <p className="mt-0.5 text-xs text-fg-muted">
+                  role: <span className="font-mono text-fg">unavailable</span>
+                </p>
+              );
+            }
+            const exactLayout = conventionRole === "layout" ? layoutConventionOf(file.path) : null;
+            const actions =
+              conventionRole === "page" && file.serverActionCount !== null
+                ? file.serverActionCount
+                : 0;
+            return (
+              <p className="mt-0.5 text-xs text-fg-muted">
+                role: <span className="font-mono text-fg">{roleLabel(conventionRole)}</span>
+                {exactLayout !== null && exactLayout !== "layout" ? ` (${exactLayout})` : ""}
+                {actions > 0
+                  ? ` · ${actions} server action${actions === 1 ? "" : "s"}`
+                  : ""}
+              </p>
+            );
+          })()
+        ) : (
+          <div className="mt-1 space-y-1 border-l-2 border-line pl-2">
+            <p className="text-xs text-fg-muted">Roles are unavailable for this analysis.</p>
+            <button
+              type="button"
+              onClick={props.onRerun}
+              className="rounded-[3px] border border-line bg-surface px-2 py-1 text-xs hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              Re-analyse repository
+            </button>
+            {props.reanalysisNote !== null && (
+              <p className="text-xs text-fg-muted">{props.reanalysisNote}</p>
+            )}
+          </div>
+        )}
         {props.rolesByPath.get(file.path) !== undefined && (
           <p className="mt-0.5 text-xs text-fg-muted">
-            role: <span className="font-mono text-fg">{props.rolesByPath.get(file.path)?.role}</span>
+            AI label: <span className="font-mono text-fg">{props.rolesByPath.get(file.path)?.role}</span>{" "}
+            <span>({props.rolesByPath.get(file.path)?.source})</span>
           </p>
         )}
       </div>

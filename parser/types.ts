@@ -21,6 +21,25 @@ export type ModuleKind =
  */
 export type FileReach = "none" | "framework" | "entrypoint";
 
+/**
+ * What a file is, single-valued, so a filter dims exactly one set and the counts
+ * add up. A role is proven by a framework convention or by syntax; when neither
+ * proves it, the honest answer is "unclassified" rather than a guess.
+ */
+export type FileRole =
+  | "page"
+  | "layout"
+  | "route-handler"
+  | "middleware"
+  | "action-module"
+  | "component"
+  | "hook"
+  | "config"
+  | "style"
+  | "asset"
+  | "docs"
+  | "unclassified";
+
 export interface ParsedFile {
   /** Repository-relative, forward slashes. */
   path: string;
@@ -29,6 +48,12 @@ export interface ParsedFile {
   extension: string;
   kind: ModuleKind;
   reach: FileReach;
+  role: FileRole;
+  /**
+   * Inline server actions a page hosts. Null for every other role, and for a page
+   * that hosts none: zero and "not a page" are different answers.
+   */
+  serverActionCount: number | null;
   lines: number;
   bytes: number;
   /** Hex digest of the contents, so a rerun can tell whether anything changed. */

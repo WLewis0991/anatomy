@@ -3,7 +3,6 @@ import "server-only";
 import { createSupabaseClient } from "@/lib/supabase";
 import { fetchRepository, cleanupRepository, normalizeRepositoryUrl } from "@/lib/fetch-repository";
 import { parseRepository } from "@/parser/parse-repository";
-import { fallbackAdapter } from "@/parser/adapter";
 import type { ParseResult, Coverage } from "@/parser/types";
 import type { Json } from "@/lib/database.types";
 import { assignUnidentifiedRoles } from "@/lib/ai/roles";
@@ -67,12 +66,23 @@ export async function runAnalysisPipeline(
       // Stage: parsing
       await updateStage("parsing", "Parsing source files...");
 
-      const parseResult = await parseRepository({ root, adapter: fallbackAdapter });
+      const parseResult = await parseRepository({ root });
 
       // Stage: storing
       await updateStage("storing", "Storing files and dependencies...");
 
       const stored = await storeAnalysisResult(supabase, analysisId, organizationId, parseResult);
+
+      // The files, and the roles on them, are now stored. Only here is it true
+      // that this run wrote a role for every file, so only here may the row say
+      // it did. A run that fails earlier leaves the version at zero.
+      const { error: roleVersionError } = await supabase
+        .from("analyses")
+        .update({ role_schema_version: 1 })
+        .eq("id", analysisId);
+      if (roleVersionError) {
+        throw new Error(`Failed to record role schema version: ${roleVersionError.message}`);
+      }
 
       const { error: adapterError } = await supabase
         .from("analyses")
@@ -90,7 +100,9 @@ export async function runAnalysisPipeline(
         organizationId,
         analysisId,
         candidates: parseResult.files
-          .filter((file) => file.kind === "other")
+          // Convention has already claimed every file it can prove. What is
+          // left is `unclassified`, which is exactly what the AI label is for.
+          .filter((file) => file.role === "unclassified")
           .flatMap((file) => {
             const id = stored.fileIdByPath.get(file.path);
             return id === undefined
@@ -165,6 +177,8 @@ async function resetForRun(
       coverage_json: null,
       adapter: null,
       head_sha: null,
+      // A rerun stores new files before it may claim they carry roles.
+      role_schema_version: 0,
       status: "pending",
       stage: "pending",
       stage_message: null,
@@ -192,6 +206,10 @@ async function storeAnalysisResult(
     organization_id: organizationId,
     path: file.path,
     hash: file.hash,
+    kind: file.kind,
+    reach: file.reach,
+    role: file.role,
+    server_action_count: file.serverActionCount,
   }));
 
   const insertedFiles: { id: string; path: string }[] = [];
